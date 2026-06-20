@@ -5,7 +5,7 @@ const crypto = require("node:crypto");
 const { pathToFileURL } = require("node:url");
 const { readHistory, appendHistory, ensureRuntimeFiles } = require("./lib/history");
 const { createEmbedding, cosineSimilarity } = require("./lib/embedding");
-const { collectSearchResults } = require("./lib/search");
+const { collectSearchResults, summarizeSourceQuality } = require("./lib/search");
 const { runCodexGeneration, fetchCodexUsageSnapshot } = require("./lib/codexRunner");
 const { normalizeAgentResult, getPreviewImages } = require("./lib/imageAssets");
 const { publishToNaver, checkNaverSession } = require("./lib/naverPublisher");
@@ -189,43 +189,21 @@ function buildTags(topic, keyword, articleTags) {
   return [...new Set(raw)].slice(0, 29);
 }
 
-function summarizeSourceQuality(searchResults, topicMode = "manual", options = {}) {
-  const results = Array.isArray(searchResults) ? searchResults : [];
-  const withExcerpt = results.filter((item) => String(item?.excerpt || "").trim().length >= 80);
-  const usable = results.filter((item) => {
-    const excerptLength = String(item?.excerpt || "").trim().length;
-    const contentLength = Number(item?.contentLength || 0);
-    return excerptLength >= 120 || contentLength >= 300;
-  });
-  const topicMatched = results.filter((item) => Array.isArray(item?.relevance?.topicMatchedTerms) && item.relevance.topicMatchedTerms.length);
-  const strongEvidence = results.filter((item) => (
-    item?.relevance?.strictEvidence === true
-    && item?.relevance?.officialSource === true
-    && item?.relevance?.currentFactSignal === true
-    && Array.isArray(item?.relevance?.keywordMatchedTerms)
-    && item.relevance.keywordMatchedTerms.length > 0
-  ));
-  const requiresTopicMatch = String(topicMode || "manual") !== "auto";
-  const strictEvidence = String(options.searchNeed || "").toLowerCase() === "strict"
-    && results.some((item) => item?.relevance?.strictEvidence === true);
-  const status = strictEvidence
-    ? strongEvidence.length ? "usable" : "insufficient"
-    : usable.length && (!requiresTopicMatch || topicMatched.length) ? "usable" : "insufficient";
-  return {
-    status,
-    totalCandidates: results.length,
-    extractedCandidates: withExcerpt.length,
-    usableExtractedCandidates: usable.length,
-    topicMatchedCandidates: topicMatched.length,
-    strongEvidenceCandidates: strongEvidence.length,
-    reason: status === "usable"
-      ? strictEvidence
-        ? "검색 후보에서 공식/현재성 근거와 주제 직접성이 함께 확인되었습니다."
-        : "검색 후보에서 사용할 수 있는 본문 발췌가 확보되었습니다."
-      : strictEvidence
-        ? "공식 또는 신뢰 가능한 현재성 근거와 주제 직접성이 함께 확인되는 검색 후보가 부족합니다."
-        : "검색 후보에서 사용할 수 있는 본문 발췌가 부족합니다. 주제/키워드 오타 또는 검색 결과 불일치 가능성이 있습니다."
-  };
+function mergeSearchResults(...groups) {
+  const merged = [];
+  const seen = new Set();
+  for (const group of groups) {
+    for (const item of Array.isArray(group) ? group : []) {
+      const key = String(item?.url || item?.fetchedUrl || "").replace(/[#?].*$/, "");
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      merged.push(item);
+    }
+  }
+  return merged.slice(0, 20).map((item, index) => ({
+    ...item,
+    sourceId: item.sourceId || `${item.provider || "source"}-${index + 1}`
+  }));
 }
 
 function detectCodexSourceFailure(result) {
@@ -598,7 +576,8 @@ async function startJob(form) {
             at: new Date().toISOString()
           });
         },
-        onSearchNeeded: async (researchResult) => {
+        onSearchNeeded: async (researchResult, context) => {
+          const searchContext = context || {};
           const searchTopic = String(
             researchResult.topicThesis
             || researchResult.finalTitle
@@ -627,14 +606,15 @@ async function startJob(form) {
             naverSearchUrl: form.naverSearchUrl,
             googleSearchUrl: form.googleSearchUrl
           }, (message, level) => safeLog(jobId, message, level, "research"));
-          safeLog(jobId, `검색 후보 수집 완료: ${searchResults.length}개`, "info", "research");
-          const sourceQuality = summarizeSourceQuality(searchResults, form.topicMode || "manual", {
+          const mergedSearchResults = mergeSearchResults(searchContext.previousSearchResults, searchResults);
+          safeLog(jobId, `검색 후보 수집 완료: ${searchResults.length}개, 누적 ${mergedSearchResults.length}개`, "info", "research");
+          const sourceQuality = summarizeSourceQuality(mergedSearchResults, form.topicMode || "manual", {
             searchNeed: researchResult.searchNeed || ""
           });
           if (sourceQuality.status === "insufficient") {
             safeLog(jobId, sourceQuality.reason, "warn", "research");
           }
-          return { searchResults, sourceQuality };
+          return { searchResults: mergedSearchResults, sourceQuality };
         }
       }, (message, level, agent = "main") => {
         const phaseMatch = String(message || "").match(/^Codex 단계:\s*(.+)$/);

@@ -172,6 +172,72 @@ const sourceFiles = {
   }
 };
 
+const searchLib = require(path.join(root, "src", "lib", "search.js"));
+const searchPrivate = searchLib._private || {};
+
+function assertCondition(condition, description) {
+  if (!condition) {
+    failed = true;
+    console.error(description);
+  }
+}
+
+assertCondition(
+  typeof searchLib.summarizeSourceQuality === "function",
+  "src/lib/search.js: source quality summarizer must be exported for runtime and checks"
+);
+assertCondition(
+  searchPrivate.isLowValueResult?.("feedback", "https://support.google.com/websearch") === true,
+  "src/lib/search.js: generic support/search-help pages must be filtered before content extraction"
+);
+const longBroadcastQuery = searchPrivate.buildQueryText?.(
+  "가장 최근 전현무계획 방송에 나온 맛집 소개",
+  "전현무계획 맛집, 전현무계획 오늘 맛집, 전현무계획 지역 맛집, 전현무계획 식당 위치, 전현무계획 메뉴 가격, 백반기행 맛집, 생생정보 맛집, 6시내고향 맛집",
+  "auto"
+);
+assertCondition(
+  typeof longBroadcastQuery === "string" && longBroadcastQuery.length <= 260 && !longBroadcastQuery.includes("6시내고향 맛집"),
+  "src/lib/search.js: automatic search queries must be compacted instead of sending every category keyword"
+);
+const strictSearchOptions = {
+  searchNeed: "strict",
+  topic: "2026 소상공인 정책자금 신청 대상",
+  keyword: "소상공인정책자금, 소상공인공고",
+  researchGuidance: "공고 신청 기간 대상 자격 확인"
+};
+const strictProfile = searchPrivate.buildSearchProfile?.(strictSearchOptions);
+const institutionalRelevance = searchPrivate.scoreCandidate?.({
+  title: "소상공인24 소상공인정책자금 신청 대상 공고",
+  url: "https://www.sbiz.or.kr/cot/cm/intro.do",
+  excerpt: "2026년 소상공인정책자금 신청 기간과 지원 대상, 자격, 공고 내용을 안내합니다."
+}, ["소상공인정책자금", "신청", "대상"], strictSearchOptions, strictProfile);
+assertCondition(
+  institutionalRelevance?.institutionalSource === true && institutionalRelevance?.currentFactSignal === true,
+  "src/lib/search.js: institutional current sources must be recognized without category-specific site hardcoding"
+);
+const institutionalSummary = searchLib.summarizeSourceQuality?.([{
+  title: "소상공인24 소상공인정책자금 신청 대상 공고",
+  url: "https://www.sbiz.or.kr/cot/cm/intro.do",
+  contentLength: 420,
+  excerpt: "2026년 소상공인정책자금 신청 기간과 지원 대상, 자격, 공고 내용을 안내합니다.",
+  relevance: institutionalRelevance
+}], "auto", { searchNeed: "strict" });
+assertCondition(
+  institutionalSummary?.status === "usable" && institutionalSummary?.strongEvidenceCandidates === 1,
+  "src/lib/search.js: strict source quality must accept reliable current institutional evidence"
+);
+const irrelevantSummary = searchLib.summarizeSourceQuality?.([{
+  title: "feedback",
+  url: "https://support.google.com/websearch",
+  contentLength: 361,
+  excerpt: "Google 검색 고객센터 도움말 센터 검색 도움말 포럼 서비스 약관 의견 보내기",
+  relevance: { score: 0, matchedTerms: [] }
+}], "auto", { searchNeed: "normal" });
+assertCondition(
+  irrelevantSummary?.status === "insufficient",
+  "src/lib/search.js: source quality must reject extracted text with no direct relevance"
+);
+
 assertNotIncludes(
   sourceFiles.main,
   "prepareNaverPostWrite",

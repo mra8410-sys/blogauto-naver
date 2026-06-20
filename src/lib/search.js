@@ -60,8 +60,10 @@ const STOP_WORDS = new Set([
 ]);
 
 const CURRENT_FACT_PATTERN = /(모집|채용|접수|신청\s*기간|신청기간|지원\s*대상|지원대상|대상\s*연령|대상연령|신청\s*조건|신청조건|참여\s*대상|참여대상|사업\s*기간|사업기간|운영\s*기간|운영기간|마감|공고|자격|선발|교육\s*기간|교육기간)/i;
+const DATE_FACT_PATTERN = /(20\d{2}\s*년|\d{1,2}\s*월\s*\d{1,2}\s*일|\d{4}[./-]\d{1,2}[./-]\d{1,2}|today|yesterday|tomorrow|jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)/i;
 const LOW_TRUST_DOMAIN_PATTERN = /(blogspot\.com|tistory\.com|wordpress\.com|blog\.naver\.com|m\.blog\.naver\.com|cafe\.naver\.com|brunch\.co\.kr|post\.naver\.com)/i;
-const OFFICIAL_DOMAIN_PATTERN = /(^|\.)go\.kr$/i;
+const OFFICIAL_DOMAIN_PATTERN = /(^|\.)go\.kr$|(^|\.)gov(\.[a-z]{2,})?$|(^|\.)mil(\.[a-z]{2,})?$|(^|\.)edu(\.[a-z]{2,})?$|(^|\.)ac\.kr$/i;
+const INSTITUTIONAL_DOMAIN_PATTERN = /(^|\.)or\.kr$|(^|\.)org$|(^|\.)int$|(^|\.)re\.kr$/i;
 
 function fetchText(url) {
   return new Promise((resolve, reject) => {
@@ -134,16 +136,20 @@ function isLikelyAd(text, url) {
 
 function isLowValueResult(text, url) {
   const joined = `${text} ${url}`.toLowerCase();
+  const host = hostFromUrl(url);
   if (/검색옵션|검색\s*고객센터|개인정보처리방침|©|naver corp|도움말|고객센터/i.test(text)) {
     return true;
   }
   if (/policy\.naver\.com|help\.naver\.com|www\.navercorp\.com/i.test(url)) {
     return true;
   }
+  if (/^support\./i.test(host) || /(^|\.)support\./i.test(host)) {
+    return true;
+  }
   if (/\b(friend1004|jupiter\d+|apollon\d+|dionysus\d+)\.com\b/i.test(url)) {
     return true;
   }
-  return /\/privacy|\/policy|\/help/i.test(joined);
+  return /\/privacy|\/policy|\/help|\/support|\/feedback|\/websearch/i.test(joined);
 }
 
 function hostFromUrl(url) {
@@ -157,6 +163,11 @@ function hostFromUrl(url) {
 function isOfficialDomain(url) {
   const host = hostFromUrl(url);
   return OFFICIAL_DOMAIN_PATTERN.test(host);
+}
+
+function isInstitutionalDomain(url) {
+  const host = hostFromUrl(url);
+  return INSTITUTIONAL_DOMAIN_PATTERN.test(host);
 }
 
 function isLowTrustDomain(url) {
@@ -183,7 +194,7 @@ function evidenceText(options) {
 
 function requiresStrictSourceEvidence(options) {
   const searchNeed = String(options.searchNeed || "").toLowerCase();
-  if (!["strict", "normal"].includes(searchNeed)) return false;
+  if (searchNeed !== "strict") return false;
   const text = evidenceText(options);
   return /(모집|채용|접수|신청|공고|지원금|고용지원|취업지원|정책|교육|훈련|대상|자격|마감|기간|공식|현재\s*유효|운영\s*중|신뢰\s*가능)/i.test(text);
 }
@@ -203,8 +214,9 @@ function candidateSignals(candidate, profile) {
     .slice(0, 10);
   return {
     officialSource: profile.strictEvidence && isOfficialDomain(candidate.url),
+    institutionalSource: profile.strictEvidence && isInstitutionalDomain(candidate.url),
     lowTrustSource: profile.strictEvidence && isLowTrustDomain(candidate.url),
-    currentFactSignal: profile.strictEvidence && CURRENT_FACT_PATTERN.test(text),
+    currentFactSignal: profile.strictEvidence && (CURRENT_FACT_PATTERN.test(text) || DATE_FACT_PATTERN.test(text)),
     phraseMatches
   };
 }
@@ -352,6 +364,7 @@ function scoreCandidate(candidate, commonTokens, options, profile = buildSearchP
     if (!keywordMatchedTerms.includes(phrase)) keywordMatchedTerms.push(phrase);
   }
   if (signals.officialSource) score += 5;
+  if (signals.institutionalSource) score += 3;
   if (signals.currentFactSignal) score += 4;
   if (signals.lowTrustSource) score -= 4;
   if ((candidate.excerpt || "").length > 180) score += 2;
@@ -361,6 +374,7 @@ function scoreCandidate(candidate, commonTokens, options, profile = buildSearchP
     topicMatchedTerms: topicMatchedTerms.slice(0, 10),
     keywordMatchedTerms: keywordMatchedTerms.slice(0, 10),
     officialSource: signals.officialSource,
+    institutionalSource: signals.institutionalSource,
     lowTrustSource: signals.lowTrustSource,
     currentFactSignal: signals.currentFactSignal,
     strictEvidence: profile.strictEvidence
@@ -430,11 +444,7 @@ async function fetchCandidateContent(candidate) {
 }
 
 function buildSearchUrl(provider, template, topic, keyword, topicMode, querySuffix = "") {
-  const hasManualTopic = String(topicMode || "manual") !== "auto" && String(topic || "").trim();
-  const queryText = [
-    hasManualTopic ? String(topic || "").trim() : [topic, keyword].filter(Boolean).join(" "),
-    querySuffix
-  ].filter(Boolean).join(" ");
+  const queryText = buildQueryText(topic, keyword, topicMode, querySuffix);
   const query = encodeURIComponent(queryText);
   if (template && template.includes("{query}")) {
     return template.replace("{query}", query);
@@ -456,7 +466,10 @@ function isStrongCandidate(item, profile) {
   if (!profile.strictEvidence) return Number(item?.relevance?.score || 0) >= 3;
   const relevance = item.relevance || {};
   const hasDirectKeyword = Array.isArray(relevance.keywordMatchedTerms) && relevance.keywordMatchedTerms.length > 0;
-  return relevance.officialSource === true
+  const hasReliableSource = relevance.officialSource === true
+    || relevance.institutionalSource === true
+    || relevance.lowTrustSource !== true;
+  return hasReliableSource
     && relevance.currentFactSignal === true
     && hasDirectKeyword
     && Number(relevance.score || 0) >= 8;
@@ -466,10 +479,29 @@ function focusedOfficialSearchSuffix(options, profile) {
   if (!profile.strictEvidence) return "";
   const phrases = profile.keywordPhrases.slice(0, 4).join(" ");
   const topic = String(options.topic || "").replace(/\s+/g, " ").trim().slice(0, 90);
-  return [topic, phrases, "모집 신청기간 대상 자격 공고 site:go.kr"]
+  return [topic, phrases, "공식 발표 공고 신청 기간 대상 자격 최신 출처"]
     .filter(Boolean)
     .join(" ")
     .slice(0, 220);
+}
+
+function compactKeywordQuery(keyword, maxPhrases = 6) {
+  return splitKeywordPhrases(keyword).slice(0, maxPhrases).join(" ");
+}
+
+function buildQueryText(topic, keyword, topicMode, querySuffix = "") {
+  const cleanedTopic = String(topic || "").replace(/\s+/g, " ").trim();
+  const keywordText = compactKeywordQuery(keyword, String(topicMode || "manual") === "auto" ? 6 : 4);
+  const base = [cleanedTopic, keywordText]
+    .filter(Boolean)
+    .join(" ")
+    .slice(0, 180);
+  return [base, querySuffix]
+    .filter(Boolean)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 260);
 }
 
 async function collectProviderCandidates(providers, options, log, querySuffix = "") {
@@ -538,20 +570,14 @@ async function collectSearchResults(options, log = () => {}) {
     .sort((a, b) => b.relevance.score - a.relevance.score)
     .slice(0, MAX_SELECTED_CONTENT_RESULTS);
 
-    const hasManualTopic = String(options.topicMode || "manual") !== "auto" && tokenize(options.topic || "").length > 0;
-    const selected = scored.length
-      ? scored
-      : hasManualTopic
-        ? []
-        : withContent.slice(0, MAX_SELECTED_CONTENT_RESULTS);
-    return { selected, withContent };
+    return { selected: scored, withContent };
   };
 
   let { selected, withContent } = await enrichAndScore(candidates);
   if (profile.strictEvidence && !selected.some((item) => isStrongCandidate(item, profile))) {
     const suffix = focusedOfficialSearchSuffix(options, profile);
     if (suffix) {
-      log("현재성/공식 근거가 필요한 검색으로 판단되어 공식 후보 중심으로 보강 검색합니다.", "info");
+      log("현재성/신뢰 근거가 필요한 검색으로 판단되어 보강 검색합니다.", "info");
       const refined = await collectProviderCandidates(providers, options, log, suffix);
       for (const item of refined) {
         const key = item.url.replace(/[#?].*$/, "");
@@ -581,6 +607,76 @@ async function collectSearchResults(options, log = () => {}) {
   }));
 }
 
+function hasDirectRelevance(item) {
+  const relevance = item?.relevance || {};
+  const score = Number(relevance.score || 0);
+  const matchedCount = [
+    ...(Array.isArray(relevance.topicMatchedTerms) ? relevance.topicMatchedTerms : []),
+    ...(Array.isArray(relevance.keywordMatchedTerms) ? relevance.keywordMatchedTerms : []),
+    ...(Array.isArray(relevance.matchedTerms) ? relevance.matchedTerms : [])
+  ].length;
+  return score >= 3 && matchedCount > 0;
+}
+
+function hasStrongEvidence(item) {
+  const relevance = item?.relevance || {};
+  const hasDirectKeyword = Array.isArray(relevance.keywordMatchedTerms) && relevance.keywordMatchedTerms.length > 0;
+  const hasReliableSource = relevance.officialSource === true
+    || relevance.institutionalSource === true
+    || relevance.lowTrustSource !== true;
+  return relevance.strictEvidence === true
+    && hasReliableSource
+    && relevance.currentFactSignal === true
+    && hasDirectKeyword
+    && Number(relevance.score || 0) >= 8;
+}
+
+function summarizeSourceQuality(searchResults, _topicMode = "manual", options = {}) {
+  const results = Array.isArray(searchResults) ? searchResults : [];
+  const withExcerpt = results.filter((item) => String(item?.excerpt || "").trim().length >= 80);
+  const usable = results.filter((item) => {
+    const excerptLength = String(item?.excerpt || "").trim().length;
+    const contentLength = Number(item?.contentLength || 0);
+    return excerptLength >= 120 || contentLength >= 300;
+  });
+  const directlyRelevant = results.filter(hasDirectRelevance);
+  const topicMatched = results.filter((item) => Array.isArray(item?.relevance?.topicMatchedTerms) && item.relevance.topicMatchedTerms.length);
+  const strongEvidence = results.filter(hasStrongEvidence);
+  const strictEvidence = String(options.searchNeed || "").toLowerCase() === "strict"
+    && results.some((item) => item?.relevance?.strictEvidence === true);
+  const usableRelevant = usable.filter(hasDirectRelevance);
+  const status = strictEvidence
+    ? strongEvidence.length ? "usable" : "insufficient"
+    : usableRelevant.length ? "usable" : "insufficient";
+  return {
+    status,
+    totalCandidates: results.length,
+    extractedCandidates: withExcerpt.length,
+    usableExtractedCandidates: usable.length,
+    directlyRelevantCandidates: directlyRelevant.length,
+    topicMatchedCandidates: topicMatched.length,
+    strongEvidenceCandidates: strongEvidence.length,
+    reason: status === "usable"
+      ? strictEvidence
+        ? "검색 후보에서 현재성/신뢰 근거와 주제 직접성이 함께 확인되었습니다."
+        : "검색 후보에서 주제와 직접 관련된 본문 발췌가 확보되었습니다."
+      : strictEvidence
+        ? "신뢰 가능한 현재성 근거와 주제 직접성이 함께 확인되는 검색 후보가 부족합니다."
+        : "검색 후보에서 주제와 직접 관련된 본문 발췌가 부족합니다. 주제/키워드 오타 또는 검색 결과 불일치 가능성이 있습니다."
+  };
+}
+
 module.exports = {
-  collectSearchResults
+  collectSearchResults,
+  summarizeSourceQuality,
+  _private: {
+    buildQueryText,
+    buildSearchProfile,
+    scoreCandidate,
+    summarizeSourceQuality,
+    isLowValueResult,
+    isStrongCandidate,
+    hasDirectRelevance,
+    hasStrongEvidence
+  }
 };

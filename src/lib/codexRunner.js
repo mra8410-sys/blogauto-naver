@@ -1808,15 +1808,40 @@ async function runCodexGeneration(options, log = () => {}) {
   let requestedSearchNeed = String(researchResult.searchNeed || "").toLowerCase();
   const validSearchNeeds = new Set(["skip", "light", "normal", "strict"]);
   let needsSearch = ["light", "normal", "strict"].includes(requestedSearchNeed);
-  if (
+  const maxResearchSearchRounds = 2;
+  let researchSearchRound = 0;
+  while (
     needsSearch
-    && effectiveOptions.searchResults.length === 0
     && typeof options.onSearchNeeded === "function"
+    && researchSearchRound < maxResearchSearchRounds
+    && (
+      effectiveOptions.searchResults.length === 0
+      || (
+        ["REVISION", "BLOCK"].includes(researchStatus)
+        && isResearchSourceFailure(researchResult)
+      )
+    )
   ) {
-    log(`Research/Title Agent 검색 필요 판단: ${requestedSearchNeed}`, "info", "research");
-    preserveAgentFile(options.jobDir, "research-title-prompt.txt", "research-title-initial-prompt.txt");
-    preserveAgentFile(options.jobDir, "research-title-result.json", "research-title-initial-result.json");
-    const searchPayload = await options.onSearchNeeded(researchResult);
+    researchSearchRound += 1;
+    const searchRoundLabel = researchSearchRound === 1
+      ? `Research/Title Agent 검색 필요 판단: ${requestedSearchNeed}`
+      : `Research/Title Agent 근거 부족으로 보강 재검색 (${researchSearchRound}/${maxResearchSearchRounds}): ${requestedSearchNeed}`;
+    log(searchRoundLabel, "info", "research");
+    preserveAgentFile(
+      options.jobDir,
+      "research-title-prompt.txt",
+      researchSearchRound === 1 ? "research-title-initial-prompt.txt" : `research-title-before-search-${researchSearchRound}.txt`
+    );
+    preserveAgentFile(
+      options.jobDir,
+      "research-title-result.json",
+      researchSearchRound === 1 ? "research-title-initial-result.json" : `research-title-before-search-${researchSearchRound}.json`
+    );
+    const searchPayload = await options.onSearchNeeded(researchResult, {
+      round: researchSearchRound,
+      previousSearchResults: effectiveOptions.searchResults,
+      sourceQuality: effectiveOptions.sourceQuality
+    });
     effectiveOptions = {
       ...effectiveOptions,
       searchResults: Array.isArray(searchPayload?.searchResults) ? searchPayload.searchResults : [],
@@ -1825,8 +1850,8 @@ async function runCodexGeneration(options, log = () => {}) {
     researchResult = await runCodexTask({
       options: effectiveOptions,
       prompt: buildResearchTitlePrompt(effectiveOptions),
-      promptFileName: "research-title-prompt.txt",
-      resultFileName: "research-title-result.json",
+      promptFileName: researchSearchRound === 1 ? "research-title-prompt.txt" : `research-title-search-${researchSearchRound}-prompt.txt`,
+      resultFileName: researchSearchRound === 1 ? "research-title-result.json" : `research-title-search-${researchSearchRound}-result.json`,
       log,
       tokenOffset: totalTokens,
       grossTokenOffset: totalGrossTokens,
