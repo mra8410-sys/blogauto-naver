@@ -206,6 +206,18 @@ function mergeSearchResults(...groups) {
   }));
 }
 
+function selectSearchTopicForResearch(researchResult, context = {}) {
+  const topicMode = String(context.topicMode || "manual").toLowerCase();
+  const directTopic = String(context.topic || "").trim();
+  if (topicMode === "manual" && directTopic) return directTopic;
+  return String(
+    researchResult?.finalTitle
+    || researchResult?.selectedTitle
+    || directTopic
+    || `${context.category || ""} ${context.keyword || ""}`.trim()
+  ).replace(/\s+/g, " ").trim();
+}
+
 function detectCodexSourceFailure(result) {
   const status = String(result?.status || "").toLowerCase();
   const explicitReason = String(result?.failureReason || result?.reason || "").trim();
@@ -578,13 +590,12 @@ async function startJob(form) {
         },
         onSearchNeeded: async (researchResult, context) => {
           const searchContext = context || {};
-          const searchTopic = String(
-            researchResult.topicThesis
-            || researchResult.finalTitle
-            || researchResult.selectedTitle
-            || topic
-            || `${category} ${keyword}`.trim()
-          ).trim();
+          const searchTopic = selectSearchTopicForResearch(researchResult, {
+            topic,
+            category,
+            keyword,
+            topicMode: form.topicMode || "manual"
+          });
           const searchKeyword = keyword || category;
           safeLog(jobId, `Research/Title Agent 요청으로 검색 후보 수집 시작: ${researchResult.searchNeed || "normal"}`, "info", "research");
           const searchResults = await collectSearchResults({

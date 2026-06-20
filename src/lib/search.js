@@ -64,6 +64,7 @@ const DATE_FACT_PATTERN = /(20\d{2}\s*년|\d{1,2}\s*월\s*\d{1,2}\s*일|\d{4}[./
 const LOW_TRUST_DOMAIN_PATTERN = /(blogspot\.com|tistory\.com|wordpress\.com|blog\.naver\.com|m\.blog\.naver\.com|cafe\.naver\.com|brunch\.co\.kr|post\.naver\.com)/i;
 const OFFICIAL_DOMAIN_PATTERN = /(^|\.)go\.kr$|(^|\.)gov(\.[a-z]{2,})?$|(^|\.)mil(\.[a-z]{2,})?$|(^|\.)edu(\.[a-z]{2,})?$|(^|\.)ac\.kr$/i;
 const INSTITUTIONAL_DOMAIN_PATTERN = /(^|\.)or\.kr$|(^|\.)org$|(^|\.)int$|(^|\.)re\.kr$/i;
+const UNSUPPORTED_CONTENT_URL_PATTERN = /\.(?:pdf|xls|xlsx|csv|doc|docx|ppt|pptx|hwp|hwpx|zip|7z|rar)(?:[?#].*)?$/i;
 
 function fetchText(url) {
   return new Promise((resolve, reject) => {
@@ -149,6 +150,12 @@ function isLowValueResult(text, url) {
   if (/\b(friend1004|jupiter\d+|apollon\d+|dionysus\d+)\.com\b/i.test(url)) {
     return true;
   }
+  if (isUnsupportedContentUrl(url)) {
+    return true;
+  }
+  if (/^keep\.naver\.com$/i.test(host)) {
+    return true;
+  }
   return /\/privacy|\/policy|\/help|\/support|\/feedback|\/websearch/i.test(joined);
 }
 
@@ -158,6 +165,11 @@ function hostFromUrl(url) {
   } catch {
     return "";
   }
+}
+
+function isUnsupportedContentUrl(url) {
+  const normalized = String(url || "").split("#")[0].split("?")[0];
+  return UNSUPPORTED_CONTENT_URL_PATTERN.test(normalized);
 }
 
 function isOfficialDomain(url) {
@@ -180,6 +192,26 @@ function splitKeywordPhrases(keyword) {
     .map((item) => item.trim())
     .filter((item) => item.length >= 3 && !STOP_WORDS.has(item.toLowerCase()))
     .slice(0, 12);
+}
+
+function escapeRegExp(value) {
+  return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function compactTopicForSearch(topic, keyword = "", maxLength = 90) {
+  let compacted = String(topic || "")
+    .replace(/\s+/g, " ")
+    .replace(/[“”"']/g, "")
+    .trim();
+  for (const phrase of splitKeywordPhrases(keyword)) {
+    compacted = compacted.replace(new RegExp(escapeRegExp(phrase), "gi"), " ");
+  }
+  return compacted
+    .replace(/[.,;:!?]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, maxLength)
+    .trim();
 }
 
 function evidenceText(options) {
@@ -246,6 +278,15 @@ function parseLinks(html, provider) {
     results.push({ provider, title, url });
   }
   return results;
+}
+
+function candidateMatchesSearchIntent(candidate, options) {
+  const searchText = `${candidate.title || ""} ${candidate.url || ""}`.toLowerCase();
+  const keywordTokens = tokenize(options.keyword || "");
+  const topicTokens = tokenize(compactTopicForSearch(options.topic || "", options.keyword || ""));
+  const requiredTokens = keywordTokens.length ? keywordTokens : topicTokens.slice(0, 4);
+  if (!requiredTokens.length) return true;
+  return requiredTokens.some((token) => searchText.includes(token.toLowerCase()));
 }
 
 function findNaverBlogFrame(html, url) {
@@ -492,7 +533,11 @@ function compactKeywordQuery(keyword, maxPhrases = 6) {
 function buildQueryText(topic, keyword, topicMode, querySuffix = "") {
   const cleanedTopic = String(topic || "").replace(/\s+/g, " ").trim();
   const keywordText = compactKeywordQuery(keyword, String(topicMode || "manual") === "auto" ? 6 : 4);
-  const base = [cleanedTopic, keywordText]
+  const isAuto = String(topicMode || "manual") === "auto";
+  const topicText = isAuto
+    ? compactTopicForSearch(cleanedTopic, keyword, keywordText ? 55 : 140)
+    : cleanedTopic.slice(0, 140);
+  const base = (isAuto ? [keywordText, topicText] : [topicText, keywordText])
     .filter(Boolean)
     .join(" ")
     .slice(0, 180);
@@ -535,6 +580,8 @@ async function collectSearchResults(options, log = () => {}) {
       seen.add(key);
       return true;
     })
+    .filter((item) => !isLowValueResult(item.title, item.url))
+    .filter((item) => candidateMatchesSearchIntent(item, options))
     .slice(0, 20);
 
   if (!candidates.length) return [];
@@ -675,6 +722,9 @@ module.exports = {
     scoreCandidate,
     summarizeSourceQuality,
     isLowValueResult,
+    isUnsupportedContentUrl,
+    compactTopicForSearch,
+    candidateMatchesSearchIntent,
     isStrongCandidate,
     hasDirectRelevance,
     hasStrongEvidence

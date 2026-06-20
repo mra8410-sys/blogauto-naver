@@ -190,6 +190,34 @@ assertCondition(
   searchPrivate.isLowValueResult?.("feedback", "https://support.google.com/websearch") === true,
   "src/lib/search.js: generic support/search-help pages must be filtered before content extraction"
 );
+assertCondition(
+  searchPrivate.isUnsupportedContentUrl?.("https://example.com/report.xlsx") === true
+    && searchPrivate.isLowValueResult?.("PDF", "https://example.com/file.pdf") === true,
+  "src/lib/search.js: non-HTML document URLs must be filtered before content extraction"
+);
+const foodSearchQuery = searchPrivate.buildQueryText?.(
+  "생생정보통에 소개된 최신 맛집 중 독자가 실제 방문 전 확인해야 할 메뉴, 위치, 주변 볼거리 정보를 함께 정리하는 방향이 적합하다.",
+  "생생정보통 맛집 추천",
+  "auto"
+);
+assertCondition(
+  typeof foodSearchQuery === "string"
+    && foodSearchQuery.startsWith("생생정보통 맛집 추천")
+    && foodSearchQuery.length <= 90
+    && !foodSearchQuery.includes("적합하다"),
+  "src/lib/search.js: automatic food/news searches must prioritize compact category keywords over long Research topicThesis sentences"
+);
+assertCondition(
+  searchPrivate.candidateMatchesSearchIntent?.(
+    { title: "생생정보통 오늘 맛집 위치", url: "https://example.com/post" },
+    { topic: "생생정보통 맛집 추천", keyword: "생생정보통 맛집 추천" }
+  ) === true
+    && searchPrivate.candidateMatchesSearchIntent?.(
+      { title: "기초학문자료센터 XLS", url: "https://www.krm.or.kr/data/frbr/file.xlsx" },
+      { topic: "생생정보통 맛집 추천", keyword: "생생정보통 맛집 추천" }
+    ) === false,
+  "src/lib/search.js: search candidates must match keyword intent before fetch attempts"
+);
 const longBroadcastQuery = searchPrivate.buildQueryText?.(
   "가장 최근 전현무계획 방송에 나온 맛집 소개",
   "전현무계획 맛집, 전현무계획 오늘 맛집, 전현무계획 지역 맛집, 전현무계획 식당 위치, 전현무계획 메뉴 가격, 백반기행 맛집, 생생정보 맛집, 6시내고향 맛집",
@@ -254,6 +282,12 @@ if (resolveTopicInput && !resolveTopicInput.content.includes("topic: \"\"")) {
   console.error("src/main.js: auto topic mode must not reuse stale topic text as a direct topic");
 }
 
+const searchTopicSelector = extractFunctionBlock(sourceFiles.main, "function selectSearchTopicForResearch", "selectSearchTopicForResearch function");
+if (searchTopicSelector && !searchTopicSelector.content.includes("researchResult?.finalTitle")) {
+  failed = true;
+  console.error("src/main.js: search topic selection must prefer Research/Title finalTitle over topicThesis for search queries");
+}
+
 const generationOptions = extractBlockAfter(sourceFiles.main, "codexResult = await runCodexGeneration(", "main runCodexGeneration options");
 if (generationOptions && !generationOptions.content.includes("searchResults: []")) {
   failed = true;
@@ -264,6 +298,10 @@ if (generationOptions && !generationOptions.content.includes("onSearchNeeded: as
   console.error("src/main.js: runCodexGeneration options must include onSearchNeeded");
 }
 const searchCallback = extractBlockAfter(sourceFiles.main, "onSearchNeeded: async", "main onSearchNeeded callback");
+if (searchCallback && !searchCallback.content.includes("selectSearchTopicForResearch(researchResult")) {
+  failed = true;
+  console.error("src/main.js: onSearchNeeded must use compact search topic selection instead of raw topicThesis");
+}
 for (const index of allIndexesOf(sourceFiles.main.content, "collectSearchResults({")) {
   if (!searchCallback || index < searchCallback.start || index > searchCallback.end) {
     failed = true;
