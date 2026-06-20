@@ -11,6 +11,8 @@ const DEFAULT_AGENT_MODELS = {
   imageStyle: "medium"
 };
 const VALID_AGENT_MODEL_EFFORTS = new Set(["low", "medium", "high", "xhigh"]);
+const DEFAULT_IMAGE_ASPECT_RATIO = "16:9";
+const IMAGE_ASPECT_RATIOS = new Set([DEFAULT_IMAGE_ASPECT_RATIO, "9:16", "1:1"]);
 const CODEX_USAGE_LIMIT_TYPES = new Set([
   "workspace_owner_usage_limit_reached",
   "workspace_member_usage_limit_reached"
@@ -32,6 +34,11 @@ function normalizeAgentModels(models = {}) {
 
 function modelEffortForAgent(options, agent) {
   return normalizeAgentModels(options.agentModels)[agent] || DEFAULT_AGENT_MODELS[agent] || "high";
+}
+
+function normalizeImageAspectRatio(value) {
+  const normalized = String(value || "").trim();
+  return IMAGE_ASPECT_RATIOS.has(normalized) ? normalized : DEFAULT_IMAGE_ASPECT_RATIO;
 }
 
 function agentDisplayName(agent) {
@@ -653,6 +660,7 @@ function buildPrompt({
     researchTitleResult ? "- The Writer Contract is the only writing brief. Use source candidates and the full Research/Title handoff only to support facts, limits, and source boundaries." : "",
     researchTitleResult ? "- If the full handoff or source candidates conflict with the Writer Contract, keep the selected title/topic and return status \"failed\" rather than drifting." : "",
     researchTitleResult ? "- Category publishing direction may include topic-selection notes for Research/Title Agent. As Writer Agent, treat it only as category scope and reader intent, not as an instruction to perform research, select a topic, or change the selected title." : "",
+    researchTitleResult ? "- If Writer Contract says currentBridgeRequired is true, the article must explain both the older anchorEvent and the currentPeg/progress. If currentBridgeSatisfied is not true or currentPeg is missing, return status \"failed\" instead of writing a stale current-issue article." : "",
     researchTitleResult ? "" : "",
     "Instruction harness:",
     researchTitleResult ? "- You are the Writer Agent. Do not create a new topic and do not change the selected title from the Research/Title Agent." : "",
@@ -704,7 +712,7 @@ function buildPrompt({
     "- Only set status to \"success\" when the remaining extracted excerpts support a real article.",
     "- If status is \"failed\", the desktop app will record failure history and stop the cycle. That is the correct behavior.",
     "- Article must be Korean, Naver Blog SEO oriented, 1500-2000 Korean characters when possible.",
-    researchTitleResult ? "- The article must fulfill the Writer Contract: articleMission, selectedTitle, topicThesis, readerPromise, firstSectionFocus, mustAnswer, mustCover, and mustNotDo." : "",
+    researchTitleResult ? "- The article must fulfill the Writer Contract: articleMission, selectedTitle, topicThesis, readerPromise, firstSectionFocus, mustAnswer, mustCover, mustNotDo, and current bridge fields when required." : "",
     researchSearchNeed === "skip"
       ? "- Because search was skipped by Research/Title Agent, write from stable general explanation and the handoff only. Do not invent current facts, dates, amounts, conditions, official claims, or personal experience."
       : "- Do not write a fresh generic article from prior knowledge. Summarize and reorganize the extracted candidate excerpts.",
@@ -718,6 +726,7 @@ function buildPrompt({
     "- The article body must never narrate the agent's research process, source collection process, or verification workflow.",
     "- Category publishing direction is internal guidance. Do not copy it into the article body, do not justify the category, and do not open with a defensive contrast such as 'this is not a general guide/advice'.",
     "- The first section must answer the title from the reader's point of view: what the topic is, who should care, why it matters, and what the reader should understand or check next.",
+    "- When the topic uses an older anchorEvent as a current issue, the first section must bridge it to the currentPeg: current status, recent procedure, new ruling/order, settlement/dismissal, policy change, official position shift, or another source-backed reason it matters now.",
     "- Source attribution is allowed only as reader-facing verification guidance. Do not make source verification itself the main content.",
     "- For policy, support program, recruitment, education, training, money, price, schedule, deadline, or application topics, include practical reader sections for target/eligibility, support details, application or checking path, variable items to verify, and cautions. If the handoff cannot support those sections, fail instead of writing a shallow article.",
     "- The reader should feel the post is explaining the Topic itself: what happened, why it matters, what is confirmed, what is uncertain, who is affected, and what to watch next.",
@@ -825,6 +834,9 @@ function buildResearchTitlePrompt({
     "- If a user direct topic exists and topicMode is manual, preserve that topic. Search results can refine expression and verify facts, but must not replace the user's topic.",
     "- If no direct topic exists or topicMode is auto, derive one narrow candidate topic from a single Keyword lane. If current facts are required, return searchNeed light/normal/strict and wait for app-provided search candidates instead of verifying facts yourself.",
     "- Treat Current writing date as an internal freshness reference, not as title material. Put a year/month in finalTitle only when that date is part of the confirmed event, policy, product, deadline, edition, or source-backed fact itself.",
+    "- Current bridge rule: when a selected topic is anchored in an older event but framed as a current issue, separate anchorEvent from currentPeg. anchorEvent is the original event/date; currentPeg is the source-backed current reason to write now, such as recent progress, ruling, order, discovery, settlement, dismissal, official statement, policy change, deadline, application status, product change, price/schedule update, or similar current development.",
+    "- For strict/current topics, if anchorEvent exists and currentPeg cannot be confirmed from usable sources, do not return PASS. Return REVISION/BLOCK and make searchQueries seek the currentPeg rather than repeating only the old event.",
+    "- If currentBridgeRequired is true, currentBridgeSatisfied may be true only when currentPeg has a date/summary and at least one usable source boundary or usable source supports it.",
     "- Determine search need as one of: skip, light, normal, strict. Map freshness level low/medium/high to lighter or stricter research, but official/current facts still require strict handling.",
     "- Use searchNeed \"skip\" only for stable concept/explanation/opinion/experience-style topics that can be written safely without current facts.",
     "- Use searchNeed \"light\", \"normal\", or \"strict\" when current search flow, NAVER exposure, Google/official fact checks, or official/current sources are needed.",
@@ -834,7 +846,7 @@ function buildResearchTitlePrompt({
     "- For policy, support programs, law, tax, recruitment, prices, schedules, application conditions, official announcements, or reader-risk topics, require official or reliable sources.",
     "- Return BLOCK when facts are insufficient, sources conflict, the direct topic cannot be preserved, or a publishable title cannot be supported.",
     "- Do not copy source titles. Extract search flow, reader interest, repeated angles, and gaps.",
-    "- Include writerContract as the compact Writer handoff. It must define the reader-facing article mission, selected title, topic thesis, reader promise, first section focus, required answers, coverage boundaries, confirmed facts, uncertainty, source boundaries, and must-not-do items.",
+    "- Include writerContract as the compact Writer handoff. It must define the reader-facing article mission, selected title, topic thesis, reader promise, first section focus, required answers, coverage boundaries, confirmed facts, uncertainty, source boundaries, current bridge requirements, and must-not-do items.",
     "- writerContract must not narrate the search process, source collection process, or verification workflow. Put process detail in searchFlowSummary or notes, not in the Writer handoff.",
     "",
     `Search candidates already collected: ${hasSearchCandidates ? "yes" : "no"}`,
@@ -852,8 +864,9 @@ function buildResearchTitlePrompt({
     "",
     "Required output:",
     "- Write a UTF-8 JSON file at the exact Output JSON path.",
-    "- JSON shape: { \"status\": \"PASS\" | \"REVISION\" | \"BLOCK\", \"failureReason\": string, \"finalTitle\": string, \"topicThesis\": string, \"topicLane\": string, \"selectedKeywordIndexes\": number[], \"selectedKeywordPhrases\": string[], \"searchQueries\": string[], \"directTopicPreserved\": boolean, \"factBased\": boolean, \"searchNeed\": \"skip\" | \"light\" | \"normal\" | \"strict\", \"searchFlowSummary\": string, \"repeatedTopics\": string[], \"competitionGaps\": string[], \"coreQuestions\": string[], \"mustCover\": string[], \"avoidDirections\": string[], \"confirmedFacts\": string[], \"uncertainItems\": string[], \"usableSources\": [{\"sourceId\": string, \"title\": string, \"url\": string, \"reason\": string}], \"titleCandidates\": [{\"title\": string, \"reason\": string, \"risk\": string}], \"writerBrief\": string, \"writerContract\": { \"articleMission\": string, \"selectedTitle\": string, \"topicThesis\": string, \"targetReader\": string, \"readerPromise\": string, \"firstSectionFocus\": string, \"mustAnswer\": string[], \"mustCover\": string[], \"mustNotDo\": string[], \"confirmedFacts\": string[], \"uncertainItems\": string[], \"sourceBoundaries\": string[], \"recommendedStructure\": string[], \"tone\": string }, \"notes\": string[] }.",
+    "- JSON shape: { \"status\": \"PASS\" | \"REVISION\" | \"BLOCK\", \"failureReason\": string, \"finalTitle\": string, \"topicThesis\": string, \"topicLane\": string, \"selectedKeywordIndexes\": number[], \"selectedKeywordPhrases\": string[], \"searchQueries\": string[], \"anchorEvent\": {\"name\": string, \"date\": string, \"summary\": string}, \"currentPeg\": {\"date\": string, \"summary\": string, \"sourceIds\": string[]}, \"currentBridgeRequired\": boolean, \"currentBridgeSatisfied\": boolean, \"directTopicPreserved\": boolean, \"factBased\": boolean, \"searchNeed\": \"skip\" | \"light\" | \"normal\" | \"strict\", \"searchFlowSummary\": string, \"repeatedTopics\": string[], \"competitionGaps\": string[], \"coreQuestions\": string[], \"mustCover\": string[], \"avoidDirections\": string[], \"confirmedFacts\": string[], \"uncertainItems\": string[], \"usableSources\": [{\"sourceId\": string, \"title\": string, \"url\": string, \"reason\": string}], \"titleCandidates\": [{\"title\": string, \"reason\": string, \"risk\": string}], \"writerBrief\": string, \"writerContract\": { \"articleMission\": string, \"selectedTitle\": string, \"topicThesis\": string, \"targetReader\": string, \"readerPromise\": string, \"firstSectionFocus\": string, \"mustAnswer\": string[], \"mustCover\": string[], \"mustNotDo\": string[], \"confirmedFacts\": string[], \"uncertainItems\": string[], \"sourceBoundaries\": string[], \"recommendedStructure\": string[], \"currentBridgeRequired\": boolean, \"currentBridgeSatisfied\": boolean, \"anchorEvent\": object, \"currentPeg\": object, \"tone\": string }, \"notes\": string[] }.",
     "- topicLane, selectedKeywordIndexes, selectedKeywordPhrases, and searchQueries are required in auto topic mode. searchQueries must be narrow and must not contain the full Category keyword pool.",
+    "- anchorEvent/currentPeg/currentBridgeRequired/currentBridgeSatisfied are required. Use empty strings/arrays only when no older anchorEvent exists and explain that in notes.",
     "- If status is BLOCK, keep finalTitle empty unless a safe non-publishable working title is useful, and explain failureReason concisely in Korean.",
     "- If status is PASS or REVISION, finalTitle must be a Korean Naver Blog title that is click-worthy without exaggeration.",
     "- Naver-home title judgment: act like an editor choosing one homepage card, not a template filler. The title should combine a concrete subject, a confirmed event/action/tension, and the reader curiosity created by this specific topic.",
@@ -912,6 +925,7 @@ function buildMainReviewPrompt({
     "- Review the Research/Title Agent result, Writer Agent result, selected title, article body, tags, image directions/notes, facts, uncertainty, source use, and risk expressions together.",
     "- Do not trust Writer status by itself. Independently judge whether the output followed the harness principles.",
     "- Use the Writer Contract as the shared writing/review contract. Check articleMission, selectedTitle, topicThesis, readerPromise, firstSectionFocus, mustAnswer, mustCover, and mustNotDo.",
+    "- Also check currentBridgeRequired, currentBridgeSatisfied, anchorEvent, and currentPeg from the Writer Contract. A current-issue article based only on an older anchorEvent must not pass.",
     "- Return REVISION if the body follows search/source/research-process flow instead of fulfilling the Writer Contract, even when the facts are technically true.",
     "",
     "Title review:",
@@ -926,6 +940,7 @@ function buildMainReviewPrompt({
     "- For fact-based topics, only confirmed facts from the Research/Title handoff and usable sources may be used.",
     "- Conditions, dates, amounts, targets, application methods, prices, schedules, official claims, statistics, and policy details must not be invented.",
     "- If a confirmation 기준일/current 기준 is needed for 접수중, 모집중, 신청 가능, 현재 운영, current availability, prices, schedules, deadlines, policy/support conditions, or official announcements but absent or misused, do not PASS.",
+    "- If currentBridgeRequired is true, PASS only when currentBridgeSatisfied is true and the body explains the currentPeg as the reason the older anchorEvent matters now. If the article only retells the anchorEvent, return BLOCK or REVISION.",
     "- Facts and interpretation must be distinguishable. Uncertain items must not become definite claims.",
     "",
     "Search/source-use review:",
@@ -962,7 +977,7 @@ function buildMainReviewPrompt({
     "",
     "Required output:",
     "- Write a UTF-8 JSON file at the exact Output JSON path.",
-    "- JSON shape: { \"status\": \"PASS\" | \"REVISION\" | \"BLOCK\", \"failureReason\": string, \"titleReviewPass\": boolean, \"articleAnswersTitle\": boolean, \"topicPreserved\": boolean, \"factualityPass\": boolean, \"sourceUsePass\": boolean, \"bodyQualityPass\": boolean, \"riskExpressionPass\": boolean, \"writerContractPass\": boolean, \"readerFacingArticlePass\": boolean, \"noResearchProcessNarrationPass\": boolean, \"publishable\": boolean, \"issues\": string[], \"revisionInstructions\": string[], \"notes\": string[] }.",
+    "- JSON shape: { \"status\": \"PASS\" | \"REVISION\" | \"BLOCK\", \"failureReason\": string, \"titleReviewPass\": boolean, \"articleAnswersTitle\": boolean, \"topicPreserved\": boolean, \"factualityPass\": boolean, \"currentBridgePass\": boolean, \"sourceUsePass\": boolean, \"bodyQualityPass\": boolean, \"riskExpressionPass\": boolean, \"writerContractPass\": boolean, \"readerFacingArticlePass\": boolean, \"noResearchProcessNarrationPass\": boolean, \"publishable\": boolean, \"issues\": string[], \"revisionInstructions\": string[], \"notes\": string[] }.",
     "- Use Korean for failureReason, issues, revisionInstructions, and notes.",
     "- If status is PASS, failureReason must be empty and every boolean review field must be true.",
     "- If status is REVISION or BLOCK, failureReason must concisely explain why it cannot be published as-is.",
@@ -1007,6 +1022,7 @@ function buildImageWorkerPrompt({
   jobDir,
   runtimeRoot,
   includeTitleImage = true,
+  imageAspectRatio = DEFAULT_IMAGE_ASPECT_RATIO,
   maxBodyImages = 2,
   writerResult,
   finalTitle,
@@ -1014,6 +1030,7 @@ function buildImageWorkerPrompt({
 }) {
   const resultPath = path.join(jobDir, "image-worker-result.json");
   const imageDir = path.join(runtimeRoot || path.dirname(path.dirname(jobDir)), "image");
+  const selectedImageAspectRatio = normalizeImageAspectRatio(imageAspectRatio);
   const bodyImageLimit = Math.min(10, Math.max(0, Number.isFinite(Number(maxBodyImages)) ? Number(maxBodyImages) : 2));
   fs.mkdirSync(imageDir, { recursive: true });
   return [
@@ -1031,6 +1048,8 @@ function buildImageWorkerPrompt({
     "Image generation scope:",
     includeTitleImage ? "- Generate one title image when titleImagePrompt is available." : "- Do not generate a title image.",
     bodyImageLimit > 0 ? `- Generate no more than ${bodyImageLimit} body images from bodyImages[].prompt.` : "- Do not generate body images.",
+    `- Requested image aspect ratio: ${selectedImageAspectRatio}.`,
+    "- Generate every requested image in the requested aspect ratio. Keep the selected orientation and do not substitute a different ratio unless the image tool cannot support it.",
     "- Do not run shell, PowerShell, Node, Python, Copy-Item, cp, move, or file-copy commands for images.",
     "- Image Worker must not copy image files into the app image directory. The desktop app will copy returned image paths later.",
     "- If image generation returns a file outside the app image directory, return that original generated file path as-is.",
@@ -1212,6 +1231,38 @@ function buildWriterContract(researchResult = {}, context = {}) {
   const confirmedFacts = uniqueCompactTextList(researchResult?.confirmedFacts, 12);
   const uncertainItems = uniqueCompactTextList(researchResult?.uncertainItems, 8);
   const avoidDirections = uniqueCompactTextList(researchResult?.avoidDirections, 10);
+  const anchorEvent = {
+    name: firstCompactText([
+      researchResult?.writerContract?.anchorEvent?.name,
+      researchResult?.anchorEvent?.name
+    ]),
+    date: firstCompactText([
+      researchResult?.writerContract?.anchorEvent?.date,
+      researchResult?.anchorEvent?.date
+    ]),
+    summary: firstCompactText([
+      researchResult?.writerContract?.anchorEvent?.summary,
+      researchResult?.anchorEvent?.summary
+    ])
+  };
+  const currentPeg = {
+    date: firstCompactText([
+      researchResult?.writerContract?.currentPeg?.date,
+      researchResult?.currentPeg?.date
+    ]),
+    summary: firstCompactText([
+      researchResult?.writerContract?.currentPeg?.summary,
+      researchResult?.currentPeg?.summary
+    ]),
+    sourceIds: uniqueCompactTextList([
+      researchResult?.writerContract?.currentPeg?.sourceIds,
+      researchResult?.currentPeg?.sourceIds
+    ], 6)
+  };
+  const currentBridgeRequired = researchResult?.writerContract?.currentBridgeRequired === true
+    || researchResult?.currentBridgeRequired === true;
+  const currentBridgeSatisfied = researchResult?.writerContract?.currentBridgeSatisfied === true
+    || researchResult?.currentBridgeSatisfied === true;
 
   return {
     articleMission: firstCompactText([
@@ -1267,6 +1318,10 @@ function buildWriterContract(researchResult = {}, context = {}) {
       researchResult?.writerContract?.recommendedStructure,
       recommendedStructureForContract(researchResult)
     ], 8),
+    currentBridgeRequired,
+    currentBridgeSatisfied,
+    anchorEvent,
+    currentPeg,
     tone: firstCompactText([
       context.preferredTone,
       researchResult?.writerContract?.tone
@@ -1289,6 +1344,17 @@ function researchRevisionReason(researchResult) {
     researchResult?.notes,
     researchResult?.uncertainItems
   ], "Research/Title Agent가 본문 작성 전 추가 확인이 필요하다고 판단했습니다.");
+}
+
+function currentBridgeIssueReason(researchResult) {
+  if (researchResult?.currentBridgeRequired !== true) return "";
+  if (researchResult?.currentBridgeSatisfied === true) return "";
+  return summarizeAgentReason([
+    researchResult?.failureReason,
+    researchResult?.currentPeg?.summary,
+    researchResult?.uncertainItems,
+    researchResult?.notes
+  ], "과거 anchorEvent를 현재 이슈로 다루려면 현재 진행 상황이나 최근 변화(currentPeg)가 확인되어야 합니다.");
 }
 
 function isResearchSourceFailure(researchResult) {
@@ -1373,6 +1439,7 @@ function mainReviewPassIssueReason(mainReviewResult) {
     ["articleAnswersTitle", "article answers title"],
     ["topicPreserved", "topic preserved"],
     ["factualityPass", "factuality"],
+    ["currentBridgePass", "current bridge"],
     ["sourceUsePass", "source use"],
     ["bodyQualityPass", "body quality"],
     ["riskExpressionPass", "risk expressions"],
@@ -2058,6 +2125,24 @@ async function runCodexGeneration(options, log = () => {}) {
       bodyImages: [],
       titleImagePath: "",
       notes: compactTextList([researchReason, researchResult.notes]),
+      researchTitleResult: researchResult,
+      tokenUsage: tokenUsageSnapshot()
+    };
+  }
+
+  const currentBridgeIssue = currentBridgeIssueReason(researchResult);
+  if (currentBridgeIssue) {
+    log(`Research/Title Agent ?꾩옱???뚯쓣 ?뺤씤?섏? 紐삵뻽?듬땲?? ${currentBridgeIssue}`, "warn", "research");
+    return {
+      status: "failed",
+      failurePhase: "research",
+      failureReason: currentBridgeIssue,
+      title: "",
+      article: "",
+      tags: [],
+      bodyImages: [],
+      titleImagePath: "",
+      notes: compactTextList([currentBridgeIssue, researchResult.notes]),
       researchTitleResult: researchResult,
       tokenUsage: tokenUsageSnapshot()
     };

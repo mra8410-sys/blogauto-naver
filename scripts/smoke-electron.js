@@ -59,6 +59,7 @@ const path = require("node:path");
       ["category preferred tone", "#categoryPreferredTone"],
       ["category freshness level", "#categoryFreshnessLevel"],
       ["article", "#articlePreview"],
+      ["image aspect ratio", "#imageAspectRatio"],
       ["image grid", "#imageGrid"],
       ["history", "#historyBody"],
       ["codex primary usage badge", "#codexPrimaryLimitBadge"],

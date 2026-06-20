@@ -178,6 +178,8 @@ const sourceFiles = {
 
 const searchLib = require(path.join(root, "src", "lib", "search.js"));
 const searchPrivate = searchLib._private || {};
+const naverPublisherLib = require(path.join(root, "src", "lib", "naverPublisher.js"));
+const naverPublisherPrivate = naverPublisherLib._private || {};
 
 function assertCondition(condition, description) {
   if (!condition) {
@@ -197,6 +199,30 @@ assertCondition(
 assertCondition(
   sourceFiles.rendererApp.content.includes(`DEFAULT_NAVER_SEARCH_URL = "${naverBlogSearchTemplate}"`),
   "src/renderer/app.js: renderer default Naver search URL must use the blog tab"
+);
+assertCondition(
+  sourceFiles.settings.content.includes("imageAspectRatio: DEFAULT_IMAGE_ASPECT_RATIO")
+    && sourceFiles.settings.content.includes("function normalizeImageAspectRatio")
+    && sourceFiles.settings.content.includes("normalized.imageAspectRatio = normalizeImageAspectRatio(normalized.imageAspectRatio)"),
+  "src/lib/settings.js: image aspect ratio must default to 16:9 and be normalized"
+);
+assertCondition(
+  sourceFiles.rendererIndex.content.includes("id=\"imageAspectRatio\"")
+    && sourceFiles.rendererIndex.content.includes("value=\"16:9\"")
+    && sourceFiles.rendererIndex.content.includes("value=\"9:16\"")
+    && sourceFiles.rendererIndex.content.includes("value=\"1:1\""),
+  "src/renderer/index.html: image preview controls must expose 16:9, 9:16, and 1:1 aspect ratio options"
+);
+assertCondition(
+  sourceFiles.rendererApp.content.includes("imageAspectRatio: normalizeImageAspectRatio($(\"#imageAspectRatio\").value)")
+    && sourceFiles.rendererApp.content.includes("imageAspectRatio: form.imageAspectRatio")
+    && sourceFiles.rendererApp.content.includes("$(\"#imageAspectRatio\").addEventListener(\"change\""),
+  "src/renderer/app.js: image aspect ratio must be collected, saved, and persisted immediately on change"
+);
+assertCondition(
+  sourceFiles.main.content.includes("const imageAspectRatio = normalizeImageAspectRatio(form.imageAspectRatio || settings.imageAspectRatio)")
+    && sourceFiles.main.content.includes("imageAspectRatio,"),
+  "src/main.js: image aspect ratio must flow from the form into saved settings and generation options"
 );
 assertCondition(
   sourceFiles.search.content.includes(naverBlogSearchFallback),
@@ -221,6 +247,33 @@ assertCondition(
   sourceFiles.main.content.includes("searchChannel: form.searchChannel || \"blog\"")
     && sourceFiles.main.content.includes("trustBlogAsSource: form.trustBlogAsSource === true"),
   "src/main.js: category search settings must flow into generation and search callbacks"
+);
+assertCondition(
+  naverPublisherPrivate.shouldUseReservedPublishSchedule?.({
+    publishVisibility: "private",
+    publishPrivate: true,
+    publishScheduleMode: "reserve"
+  }) === false
+    && naverPublisherPrivate.shouldUseReservedPublishSchedule?.({
+      publishVisibility: "public",
+      publishPrivate: false,
+      publishScheduleMode: "reserve"
+    }) === true,
+  "src/lib/naverPublisher.js: private publishing must force current publish instead of reserved publish"
+);
+const overnightReserveParts = naverPublisherPrivate.getReservedDateParts?.(3, new Date(2026, 5, 20, 22, 37, 0));
+assertCondition(
+  overnightReserveParts?.date === "2026. 06. 21"
+    && overnightReserveParts?.hour === "01"
+    && overnightReserveParts?.minute === "40",
+  "src/lib/naverPublisher.js: reserved publishing must increment date when the offset crosses midnight"
+);
+assertCondition(
+  sourceFiles.naverPublisher.content.includes("async function clickFinalPublishButton(page, selectors, log, options = {})")
+    && sourceFiles.naverPublisher.content.includes("clickFinalPublishButton(page, selectors, log, options)")
+    && sourceFiles.naverPublisher.content.includes("input[class*='input_date'][readonly][type='text']")
+    && sourceFiles.naverPublisher.content.includes("node.setAttribute(\"value\", nextValue)"),
+  "src/lib/naverPublisher.js: reserved/current publish automation must use mode-aware final buttons and robust readonly date input"
 );
 
 assertCondition(
@@ -767,6 +820,34 @@ if (
   console.error("src/lib/codexRunner.js: Research/Title Agent must select a keyword lane and return searchQueries");
 }
 if (
+  researchTitlePrompt
+  && (!researchTitlePrompt.content.includes("Current bridge rule")
+    || !researchTitlePrompt.content.includes("anchorEvent")
+    || !researchTitlePrompt.content.includes("currentPeg")
+    || !researchTitlePrompt.content.includes("currentBridgeRequired")
+    || !researchTitlePrompt.content.includes("currentBridgeSatisfied")
+    || !researchTitlePrompt.content.includes("make searchQueries seek the currentPeg rather than repeating only the old event"))
+) {
+  failed = true;
+  console.error("src/lib/codexRunner.js: Research/Title Agent must distinguish older anchor events from source-backed current pegs");
+}
+if (
+  !sourceFiles.codexRunner.content.includes("function currentBridgeIssueReason")
+  || !sourceFiles.codexRunner.content.includes("currentBridgeIssueReason(researchResult)")
+) {
+  failed = true;
+  console.error("src/lib/codexRunner.js: stale current-issue topics must fail when currentBridgeRequired is true but unsatisfied");
+}
+if (
+  !sourceFiles.codexRunner.content.includes("currentBridgeRequired,")
+  || !sourceFiles.codexRunner.content.includes("currentBridgeSatisfied,")
+  || !sourceFiles.codexRunner.content.includes("anchorEvent,")
+  || !sourceFiles.codexRunner.content.includes("currentPeg,")
+) {
+  failed = true;
+  console.error("src/lib/codexRunner.js: Writer Contract must carry current bridge fields to Writer and Main Review");
+}
+if (
   !sourceFiles.codexRunner.content.includes("function compactSearchResultsForPrompt")
   || !sourceFiles.codexRunner.content.includes("maxResults: 6")
   || !sourceFiles.codexRunner.content.includes("excerptChars: 420")
@@ -799,6 +880,7 @@ for (const requiredReviewField of [
   "articleAnswersTitle",
   "topicPreserved",
   "factualityPass",
+  "currentBridgePass",
   "sourceUsePass",
   "bodyQualityPass",
   "riskExpressionPass",
@@ -836,6 +918,16 @@ if (
 ) {
   failed = true;
   console.error("src/lib/codexRunner.js: Main Agent title review must reject generic hook templates while preserving Preferred tone priority");
+}
+if (
+  mainReviewPrompt
+  && (!mainReviewPrompt.content.includes("currentBridgeRequired")
+    || !mainReviewPrompt.content.includes("currentBridgeSatisfied")
+    || !mainReviewPrompt.content.includes("currentBridgePass")
+    || !mainReviewPrompt.content.includes("older anchorEvent matters now"))
+) {
+  failed = true;
+  console.error("src/lib/codexRunner.js: Main Agent final review must reject stale anchor-event articles without a current bridge");
 }
 if (mainReviewPrompt && !mainReviewPrompt.content.includes("reads like a stiff report")) {
   failed = true;
@@ -922,6 +1014,10 @@ if (imageWorkerPrompt && !imageWorkerPrompt.content.includes("Korean text is all
 if (imageWorkerPrompt && !imageWorkerPrompt.content.includes("Body image policy:")) {
   failed = true;
   console.error("src/lib/codexRunner.js: Image Worker prompt must keep a separate body image policy");
+}
+if (imageWorkerPrompt && !imageWorkerPrompt.content.includes("Requested image aspect ratio")) {
+  failed = true;
+  console.error("src/lib/codexRunner.js: Image Worker prompt must instruct generation with the selected aspect ratio");
 }
 if (sourceFiles.imageAssets.content.includes("function createFallbackTitleImage")) {
   failed = true;

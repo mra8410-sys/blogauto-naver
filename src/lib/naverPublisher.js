@@ -1818,8 +1818,25 @@ async function waitForPublishCompletion(page, selectors, log, timeout = 60000) {
   throw new Error("최종 발행 완료 상태를 확인하지 못했습니다. 화면의 알림 또는 발행 버튼 상태 확인이 필요합니다.");
 }
 
-async function clickFinalPublishButton(page, selectors, log) {
+function publishVisibilityFromOptions(options = {}) {
+  return String(options.publishVisibility || (options.publishPrivate ? "private" : "public")).toLowerCase();
+}
+
+function shouldUseReservedPublishSchedule(options = {}) {
+  return publishVisibilityFromOptions(options) === "public"
+    && options.publishPrivate !== true
+    && String(options.publishScheduleMode || "now") === "reserve";
+}
+
+function isReservePublishButtonText(text) {
+  return /\uC608\uC57D|reserve/i.test(String(text || "").replace(/\s+/g, " ").trim());
+}
+
+async function clickFinalPublishButton(page, selectors, log, options = {}) {
+  const wantsReservePublish = shouldUseReservedPublishSchedule(options);
   const preferredSelectors = [
+    wantsReservePublish ? "[class*='layer_popup'][class*='is_show'] button:has-text('예약')" : "",
+    wantsReservePublish ? "div[role='dialog'] button:has-text('예약')" : "",
     "[class*='layer_popup'][class*='is_show'] [data-click-area*='publish']",
     "[class*='layer_popup'][class*='is_show'] button:has-text('발행')",
     "[class*='layer_popup'] [data-click-area*='publish']",
@@ -1835,6 +1852,9 @@ async function clickFinalPublishButton(page, selectors, log) {
     const ranked = [];
     for (const item of candidates) {
       const box = await item.boundingBox().catch(() => null);
+      const buttonText = await item.innerText({ timeout: 500 }).catch(() => "");
+      const isReserveButton = isReservePublishButtonText(buttonText);
+      if (wantsReservePublish !== isReserveButton) continue;
       const disabled = await item.evaluate((element) => Boolean(
         element.disabled
         || element.getAttribute("aria-disabled") === "true"
@@ -1872,8 +1892,8 @@ async function applyPublishVisibility(page, selectors, options, log) {
   throw new Error(`공개설정 '${targetLabel}' 옵션을 찾을 수 없습니다. Naver Editor DOM notes 확인이 필요합니다.`);
 }
 
-function getReservedDateParts(offsetHours) {
-  const scheduledAt = new Date(Date.now() + Math.max(0, Number(offsetHours || 0)) * 60 * 60 * 1000);
+function getReservedDateParts(offsetHours, baseDate = new Date()) {
+  const scheduledAt = new Date(baseDate.getTime() + Math.max(0, Number(offsetHours || 0)) * 60 * 60 * 1000);
   const roundedMinute = Math.ceil(scheduledAt.getMinutes() / 10) * 10;
   if (roundedMinute >= 60) {
     scheduledAt.setHours(scheduledAt.getHours() + 1, 0, 0, 0);
@@ -1922,8 +1942,10 @@ async function fillPublishField(page, selectors, value, label, log) {
       const wasReadOnly = node.readOnly;
       node.readOnly = false;
       setNativeValue(node, nextValue);
+      node.setAttribute("value", nextValue);
       node.dispatchEvent(new Event("input", { bubbles: true }));
       node.dispatchEvent(new Event("change", { bubbles: true }));
+      node.dispatchEvent(new Event("blur", { bubbles: true }));
       node.readOnly = wasReadOnly;
       return String(node.value || "").trim() === String(nextValue || "").trim();
     }
@@ -1939,8 +1961,11 @@ async function fillPublishField(page, selectors, value, label, log) {
 }
 
 async function applyPublishSchedule(page, selectors, options, log) {
-  if (String(options.publishScheduleMode || "now") !== "reserve") {
+  if (!shouldUseReservedPublishSchedule(options)) {
     const nowOption = await findVisibleLocator(page, selectors.nowOption, 1500).catch(() => null);
+    if (String(options.publishScheduleMode || "now") === "reserve") {
+      log("비공개 발행은 예약 대신 현재 발행으로 전환했습니다.");
+    }
     if (nowOption) {
       await safeClickLocator(page, nowOption, log, "현재 발행 옵션");
     }
@@ -2048,6 +2073,8 @@ async function publishToNaver(options) {
     nowOption: "text=현재",
     reserveOption: "text=예약",
     reserveDateInput: [
+      "input[class*='input_date'][readonly][type='text']",
+      "input[readonly][type='text'][class*='date']",
       "input[title*='예약 발행 날짜']",
       "input[aria-label*='예약 발행 날짜']",
       "input[readonly][type='text'][value*='.']",
@@ -2209,7 +2236,7 @@ async function publishToNaver(options) {
     }
 
     await assertNaverSessionActive(page, selectors, log, "최종 발행 전");
-    const finalPublished = await clickFinalPublishButton(page, selectors, log);
+    const finalPublished = await clickFinalPublishButton(page, selectors, log, options);
     if (!finalPublished) {
       throw new Error("최종 발행 버튼을 찾을 수 없습니다. 발행 화면 DOM 확인이 필요합니다.");
     }
@@ -2314,5 +2341,10 @@ async function checkNaverSession(options) {
 
 module.exports = {
   publishToNaver,
-  checkNaverSession
+  checkNaverSession,
+  _private: {
+    getReservedDateParts,
+    shouldUseReservedPublishSchedule,
+    isReservePublishButtonText
+  }
 };

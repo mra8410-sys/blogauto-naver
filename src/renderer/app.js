@@ -36,6 +36,13 @@ const AGENT_MODEL_SELECTORS = {
 const VALID_AGENT_MODEL_VALUES = new Set(["low", "medium", "high", "xhigh"]);
 const AUTO_TARGET_MAX_ATTEMPTS = 3;
 const AUTO_RESEARCH_MAX_ATTEMPTS = 2;
+const DEFAULT_IMAGE_ASPECT_RATIO = "16:9";
+const IMAGE_ASPECT_RATIOS = new Set([DEFAULT_IMAGE_ASPECT_RATIO, "9:16", "1:1"]);
+
+function normalizeImageAspectRatio(value) {
+  const normalized = String(value || "").trim();
+  return IMAGE_ASPECT_RATIOS.has(normalized) ? normalized : DEFAULT_IMAGE_ASPECT_RATIO;
+}
 
 function makeId(prefix) {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -823,6 +830,7 @@ function collectForm(target = {}) {
     publishScheduleMode: $("#publishScheduleMode").value,
     reserveAfterHours: Number($("#reserveAfterHours").value || 0),
     includeTitleImage: $("#includeTitleImage").checked,
+    imageAspectRatio: normalizeImageAspectRatio($("#imageAspectRatio").value),
     maxBodyImages: Number($("#maxBodyImages").value),
     breakSentencesInBody: $("#breakSentencesInBody").checked,
     agentModels: currentAgentModels(),
@@ -847,6 +855,7 @@ function applySettings(settings) {
   }
   $("#publishAfterGenerate").checked = settings.publishAfterGenerate === true;
   $("#includeTitleImage").checked = settings.includeTitleImage !== false;
+  $("#imageAspectRatio").value = normalizeImageAspectRatio(settings.imageAspectRatio);
   $("#breakSentencesInBody").checked = settings.breakSentencesInBody !== false;
   applyAgentModels(settings.agentModels);
   if (settings.publishPrivate === false) $("#publishVisibility").value = "public";
@@ -876,6 +885,7 @@ async function saveSettingsNow() {
     publishScheduleMode: form.publishScheduleMode,
     reserveAfterHours: form.reserveAfterHours,
     includeTitleImage: form.includeTitleImage,
+    imageAspectRatio: form.imageAspectRatio,
     maxBodyImages: form.maxBodyImages,
     breakSentencesInBody: form.breakSentencesInBody,
     agentModels: form.agentModels
@@ -897,11 +907,16 @@ function scheduleSettingsSave() {
 
 function updateModeControls() {
   const isAuto = $("#topicMode").value === "auto";
+  const isPrivatePublish = $("#publishVisibility").value !== "public";
   $("#repeatTermLabel").style.display = isAuto ? "grid" : "none";
   $("#manualTopicLabel").style.display = isAuto ? "none" : "grid";
   $("#publishAfterGenerate").checked = isAuto ? true : $("#publishAfterGenerate").checked;
   $("#publishAfterGenerate").disabled = isAuto;
-  $("#reserveAfterLabel").style.display = $("#publishScheduleMode").value === "reserve" ? "grid" : "none";
+  if (isPrivatePublish && $("#publishScheduleMode").value === "reserve") {
+    $("#publishScheduleMode").value = "now";
+  }
+  $("#publishScheduleMode").disabled = isPrivatePublish;
+  $("#reserveAfterLabel").style.display = !isPrivatePublish && $("#publishScheduleMode").value === "reserve" ? "grid" : "none";
 }
 
 function getAutoTargets() {
@@ -1462,7 +1477,14 @@ async function boot() {
       });
     });
   }
+  $("#imageAspectRatio").addEventListener("change", () => {
+    saveSettingsNow().catch((error) => {
+      $("#settingsState").textContent = "설정 저장 실패";
+      addLog({ level: "error", message: error.message, at: new Date().toISOString() });
+    });
+  });
   $("#topicMode").addEventListener("change", updateModeControls);
+  $("#publishVisibility").addEventListener("change", updateModeControls);
   $("#publishScheduleMode").addEventListener("change", updateModeControls);
   $("#jobForm").querySelectorAll("input, select, textarea").forEach((control) => {
     if ([

@@ -3,6 +3,8 @@ const path = require("node:path");
 
 const LEGACY_NAVER_SEARCH_URL = "https://search.naver.com/search.naver?where=web&query={query}";
 const DEFAULT_NAVER_SEARCH_URL = "https://search.naver.com/search.naver?ssc=tab.blog.all&sm=tab_jum&query={query}";
+const DEFAULT_IMAGE_ASPECT_RATIO = "16:9";
+const IMAGE_ASPECT_RATIOS = new Set([DEFAULT_IMAGE_ASPECT_RATIO, "9:16", "1:1"]);
 
 const DEFAULT_SETTINGS = {
   naverId: "",
@@ -25,6 +27,7 @@ const DEFAULT_SETTINGS = {
   publishScheduleMode: "now",
   reserveAfterHours: 3,
   includeTitleImage: true,
+  imageAspectRatio: DEFAULT_IMAGE_ASPECT_RATIO,
   maxBodyImages: 2,
   breakSentencesInBody: true,
   agentModels: {
@@ -54,7 +57,13 @@ function normalizeSettings(settings) {
   if (!normalized.naverSearchUrl || normalized.naverSearchUrl === LEGACY_NAVER_SEARCH_URL) {
     normalized.naverSearchUrl = DEFAULT_NAVER_SEARCH_URL;
   }
+  normalized.imageAspectRatio = normalizeImageAspectRatio(normalized.imageAspectRatio);
   return normalized;
+}
+
+function normalizeImageAspectRatio(value) {
+  const normalized = String(value || "").trim();
+  return IMAGE_ASPECT_RATIOS.has(normalized) ? normalized : DEFAULT_IMAGE_ASPECT_RATIO;
 }
 
 function readSettings(runtimeRoot) {
@@ -82,14 +91,17 @@ function writeSettings(runtimeRoot, nextSettings) {
     ...current,
     ...Object.fromEntries(Object.entries(nextSettings || {}).filter(([, value]) => value !== undefined))
   };
-  fs.writeFileSync(getSettingsPath(runtimeRoot), `${JSON.stringify(merged, null, 2)}\n`, "utf8");
-  return merged;
+  const normalized = normalizeSettings(merged);
+  fs.writeFileSync(getSettingsPath(runtimeRoot), `${JSON.stringify(normalized, null, 2)}\n`, "utf8");
+  return normalized;
 }
 
 module.exports = {
   DEFAULT_SETTINGS,
   DEFAULT_NAVER_SEARCH_URL,
+  DEFAULT_IMAGE_ASPECT_RATIO,
   ensureSettingsFile,
+  normalizeImageAspectRatio,
   readSettings,
   writeSettings,
   getSettingsPath

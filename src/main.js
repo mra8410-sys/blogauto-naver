@@ -9,7 +9,7 @@ const { collectSearchResults, summarizeSourceQuality } = require("./lib/search")
 const { runCodexGeneration, fetchCodexUsageSnapshot } = require("./lib/codexRunner");
 const { normalizeAgentResult, getPreviewImages } = require("./lib/imageAssets");
 const { publishToNaver, checkNaverSession } = require("./lib/naverPublisher");
-const { ensureSettingsFile, readSettings, writeSettings } = require("./lib/settings");
+const { ensureSettingsFile, normalizeImageAspectRatio, readSettings, writeSettings } = require("./lib/settings");
 const {
   ensureAccountStoreFile,
   readAccountStore,
@@ -462,6 +462,7 @@ async function startJob(form) {
   const publishScheduleMode = String(form.publishScheduleMode || "now");
   const reserveAfterHours = Number(form.reserveAfterHours || 0);
   const includeTitleImage = form.includeTitleImage !== false;
+  const imageAspectRatio = normalizeImageAspectRatio(form.imageAspectRatio || settings.imageAspectRatio);
   const maxBodyImages = Math.min(10, Math.max(0, Number.isFinite(Number(form.maxBodyImages)) ? Number(form.maxBodyImages) : 2));
   const breakSentencesInBody = form.breakSentencesInBody !== false;
   const agentModels = form.agentModels || settings.agentModels || {};
@@ -580,6 +581,7 @@ async function startJob(form) {
     publishScheduleMode,
     reserveAfterHours,
     includeTitleImage,
+    imageAspectRatio,
     maxBodyImages,
     breakSentencesInBody,
     agentModels
@@ -629,6 +631,7 @@ async function startJob(form) {
         searchResults: [],
         currentDateLabel,
         includeTitleImage,
+        imageAspectRatio,
         maxBodyImages,
         sourceQuality: { status: "not_requested" },
         excludedTopics: form.excludedTopics || "",

@@ -1,5 +1,5 @@
 const path = require("node:path");
-const { readSettings } = require("../src/lib/settings");
+const { normalizeImageAspectRatio, readSettings } = require("../src/lib/settings");
 const { readAccountStore, getAccountProfileDir } = require("../src/lib/accountStore");
 const { ensureRuntimeFiles, readHistory, appendHistory } = require("../src/lib/history");
 const { collectSearchResults } = require("../src/lib/search");
@@ -141,6 +141,7 @@ async function main() {
     searchResults: [],
     currentDateLabel,
     includeTitleImage: settings.includeTitleImage !== false,
+    imageAspectRatio: normalizeImageAspectRatio(settings.imageAspectRatio),
     maxBodyImages: Number.isFinite(Number(settings.maxBodyImages)) ? Number(settings.maxBodyImages) : 2,
     sourceQuality: { status: "not_requested" },
     historyTitles: titleHistory.map((item) => item.title),
