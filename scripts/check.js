@@ -541,6 +541,19 @@ if (codexGeneration && !codexGeneration.content.includes("const validSearchNeeds
   failed = true;
   console.error("src/lib/codexRunner.js: runCodexGeneration must define the strict searchNeed enum");
 }
+const researchSourceFailure = extractFunctionBlock(sourceFiles.codexRunner, "function isResearchSourceFailure", "Research source failure classifier");
+if (codexGeneration && !codexGeneration.content.includes("isResearchSourceFailure(researchResult)")) {
+  failed = true;
+  console.error("src/lib/codexRunner.js: adaptive Research/Title search retry must use the source failure classifier");
+}
+if (researchSourceFailure && !researchSourceFailure.content.includes("searchNeed")) {
+  failed = true;
+  console.error("src/lib/codexRunner.js: Research source failure classifier must only trigger for explicit searchNeed values");
+}
+if (researchSourceFailure && (!researchSourceFailure.content.includes("insufficient") || !researchSourceFailure.content.includes("official"))) {
+  failed = true;
+  console.error("src/lib/codexRunner.js: Research source failure classifier must cover source and official-evidence failures");
+}
 if (codexGeneration && !codexGeneration.content.includes("if (!validSearchNeeds.has(requestedSearchNeed))")) {
   failed = true;
   console.error("src/lib/codexRunner.js: runCodexGeneration must fail invalid searchNeed values");

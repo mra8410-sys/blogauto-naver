@@ -1230,6 +1230,28 @@ function researchRevisionReason(researchResult) {
   ], "Research/Title Agent가 본문 작성 전 추가 확인이 필요하다고 판단했습니다.");
 }
 
+function isResearchSourceFailure(researchResult) {
+  const searchNeed = String(researchResult?.searchNeed || "").toLowerCase();
+  if (!["light", "normal", "strict"].includes(searchNeed)) return false;
+
+  const status = String(researchResult?.status || "").toUpperCase();
+  const text = compactTextList([
+    researchResult?.failureReason,
+    researchResult?.searchFlowSummary,
+    researchResult?.coreQuestions,
+    researchResult?.mustCover,
+    researchResult?.confirmedFacts,
+    researchResult?.uncertainItems,
+    researchResult?.usableSources,
+    researchResult?.writerBrief,
+    researchResult?.writerContract?.sourceBoundaries,
+    researchResult?.notes
+  ]).join(" / ");
+
+  if (!text) return status === "REVISION";
+  return /근거|자료|출처|발췌|검색\s*후보|공식|지도|네이버지도|카카오맵|확인.*부족|부족.*확인|관련되지|관련성이\s*없|직접\s*관련|source|insufficient|unsupported|cannot\s+support|not\s+enough|official|map/i.test(text);
+}
+
 function writerOutputIssueReason(writerResult) {
   const writerStatus = String(writerResult?.status || "").toLowerCase();
   const writerReason = summarizeAgentReason([
