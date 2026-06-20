@@ -564,6 +564,14 @@ if (researchTitlePrompt && !researchTitlePrompt.content.includes("compact Writer
   failed = true;
   console.error("src/lib/codexRunner.js: Research/Title Agent must describe writerContract as a compact Writer handoff");
 }
+if (researchTitlePrompt && !researchTitlePrompt.content.includes("Preferred tone is provided, it is the highest style signal")) {
+  failed = true;
+  console.error("src/lib/codexRunner.js: Research/Title Agent must prioritize explicit Preferred tone for title and writerContract style");
+}
+if (researchTitlePrompt && !researchTitlePrompt.content.includes("Default Naver-home title style")) {
+  failed = true;
+  console.error("src/lib/codexRunner.js: Research/Title Agent must define the default Naver-home hook title style");
+}
 const mainReviewPrompt = extractFunctionBlock(sourceFiles.codexRunner, "function buildMainReviewPrompt", "Main Agent final review prompt");
 if (mainReviewPrompt && !mainReviewPrompt.content.includes("not only title/article matching")) {
   failed = true;
@@ -610,6 +618,14 @@ if (mainReviewPrompt && !mainReviewPrompt.content.includes("not how the agent ve
   failed = true;
   console.error("src/lib/codexRunner.js: Main Agent final review must reject research-process style article leads");
 }
+if (mainReviewPrompt && !mainReviewPrompt.content.includes("explicit Preferred tone wins style conflicts")) {
+  failed = true;
+  console.error("src/lib/codexRunner.js: Main Agent title review must let explicit Preferred tone win style conflicts");
+}
+if (mainReviewPrompt && !mainReviewPrompt.content.includes("reads like a stiff report")) {
+  failed = true;
+  console.error("src/lib/codexRunner.js: Main Agent body review must reject stiff report-like default posts");
+}
 const writerPrompt = extractFunctionBlock(sourceFiles.codexRunner, "function buildPrompt", "Writer Agent prompt");
 if (writerPrompt && !writerPrompt.content.includes("This required 기준일 is not a date leak")) {
   failed = true;
@@ -642,6 +658,18 @@ if (writerPrompt && !writerPrompt.content.includes("The Writer Contract is the o
 if (writerPrompt && !writerPrompt.content.includes("Category publishing direction may include topic-selection notes")) {
   failed = true;
   console.error("src/lib/codexRunner.js: Writer Agent prompt must prevent publishPurpose role confusion");
+}
+if (writerPrompt && !writerPrompt.content.includes("explicit Preferred tone > Writer Contract tone > default human Naver Blog voice")) {
+  failed = true;
+  console.error("src/lib/codexRunner.js: Writer Agent prompt must prioritize explicit Preferred tone over default human-blog style");
+}
+if (writerPrompt && !writerPrompt.content.includes("Default human Naver Blog voice")) {
+  failed = true;
+  console.error("src/lib/codexRunner.js: Writer Agent prompt must define the default human Naver Blog voice");
+}
+if (!sourceFiles.codexRunner.content.includes("context.preferredTone,\n      researchResult?.writerContract?.tone")) {
+  failed = true;
+  console.error("src/lib/codexRunner.js: buildWriterContract must prefer user preferredTone over Research/Title tone");
 }
 if (writerPrompt && !writerPrompt.content.includes("Title image prompts may request short Korean headline text")) {
   failed = true;

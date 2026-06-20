@@ -594,6 +594,7 @@ function buildPrompt({
     `Category excluded topics: ${excludedTopics || "(agent decides)"}`,
     `Category publishing direction: ${publishPurpose || "(agent decides)"}`,
     `Preferred tone: ${preferredTone || "(agent decides)"}`,
+    "- Tone priority: explicit Preferred tone > Writer Contract tone > default human Naver Blog voice. If Preferred tone conflicts with default style rules, follow Preferred tone while preserving factual accuracy, safety, and title/body promise.",
     `Freshness level: ${freshnessLevel || "auto"}`,
     researchTitleResult ? `Research/Title selected title: ${researchTitleResult.finalTitle || researchTitleResult.selectedTitle || ""}` : "",
     `Current writing date: ${currentDateLabel || new Date().toISOString().slice(0, 10)}`,
@@ -674,6 +675,8 @@ function buildPrompt({
     "- Do not copy source sentences verbatim. Rewrite in original Korean while preserving factual meaning.",
     "- If the excerpts are too thin or unrelated to the locked Topic thesis, fail with status \"failed\". Do not put source problems inside the article body.",
     "- Write like an excellent Korean Naver blogger/editor, not like an internal research report. The article body must not use meta words such as candidate, excerpt, provided material, search result, source quality, notes, or report.",
+    "- Default human Naver Blog voice: sound like a real person organizing the issue for a reader. Use a warm but not chatty lead, mix sentence lengths, include reader-facing transitions such as what this means, why readers search for it, what to check before acting, and avoid stiff summary-report cadence.",
+    "- Unless Preferred tone explicitly asks otherwise, the opening should start from the reader's situation or curiosity before moving into facts. Do not fake personal experience, visits, purchases, or emotions that were not provided.",
     "- The article body must never narrate the agent's research process, source collection process, or verification workflow.",
     "- Category publishing direction is internal guidance. Do not copy it into the article body, do not justify the category, and do not open with a defensive contrast such as 'this is not a general guide/advice'.",
     "- The first section must answer the title from the reader's point of view: what the topic is, who should care, why it matters, and what the reader should understand or check next.",
@@ -752,6 +755,7 @@ function buildResearchTitlePrompt({
     `Excluded topics: ${excludedTopics || "(agent decides)"}`,
     `Publish purpose: ${publishPurpose || "(agent decides)"}`,
     `Preferred tone: ${preferredTone || "(agent decides)"}`,
+    "- Tone priority: if Preferred tone is provided, it is the highest style signal for finalTitle and writerContract.tone. Default hook and human-blog guidance apply only when they do not conflict with Preferred tone.",
     `Freshness level: ${freshnessLevel || "auto"}`,
     `Output JSON path: ${resultPath}`,
     "",
@@ -796,6 +800,7 @@ function buildResearchTitlePrompt({
     "- JSON shape: { \"status\": \"PASS\" | \"REVISION\" | \"BLOCK\", \"failureReason\": string, \"finalTitle\": string, \"topicThesis\": string, \"directTopicPreserved\": boolean, \"factBased\": boolean, \"searchNeed\": \"skip\" | \"light\" | \"normal\" | \"strict\", \"searchFlowSummary\": string, \"repeatedTopics\": string[], \"competitionGaps\": string[], \"coreQuestions\": string[], \"mustCover\": string[], \"avoidDirections\": string[], \"confirmedFacts\": string[], \"uncertainItems\": string[], \"usableSources\": [{\"sourceId\": string, \"title\": string, \"url\": string, \"reason\": string}], \"titleCandidates\": [{\"title\": string, \"reason\": string, \"risk\": string}], \"writerBrief\": string, \"writerContract\": { \"articleMission\": string, \"selectedTitle\": string, \"topicThesis\": string, \"targetReader\": string, \"readerPromise\": string, \"firstSectionFocus\": string, \"mustAnswer\": string[], \"mustCover\": string[], \"mustNotDo\": string[], \"confirmedFacts\": string[], \"uncertainItems\": string[], \"sourceBoundaries\": string[], \"recommendedStructure\": string[], \"tone\": string }, \"notes\": string[] }.",
     "- If status is BLOCK, keep finalTitle empty unless a safe non-publishable working title is useful, and explain failureReason concisely in Korean.",
     "- If status is PASS or REVISION, finalTitle must be a Korean Naver Blog title that is click-worthy without exaggeration.",
+    "- Default Naver-home title style: use the core keyword plus a concrete reader curiosity hook such as 이유, 체크할 점, 달라진 점, 대상, 조건, 실수, or 방문 전 확인. Avoid vague guide titles, keyword stuffing, and unsupported sensational words.",
     "- Print one final line after writing the file: BLOGAUTO_RESULT_READY"
   ].filter((line) => line !== "").join("\n");
 }
@@ -809,7 +814,8 @@ function buildMainReviewPrompt({
   currentDateLabel,
   researchTitleResult,
   writerResult,
-  finalTitle
+  finalTitle,
+  preferredTone = ""
 }) {
   const resultPath = path.join(jobDir, "main-review-result.json");
   const writerContract = buildWriterContract(researchTitleResult, {
@@ -818,7 +824,8 @@ function buildMainReviewPrompt({
     category,
     topicMode,
     currentDateLabel,
-    finalTitle
+    finalTitle,
+    preferredTone
   });
   return [
     "You are the Main Agent for a Korean Naver Blog automation app.",
@@ -830,6 +837,7 @@ function buildMainReviewPrompt({
     `Topic mode: ${topicMode}`,
     `Current writing date: ${currentDateLabel || new Date().toISOString().slice(0, 10)}`,
     `Research/Title final title: ${finalTitle}`,
+    `Preferred tone: ${preferredTone || "(agent decides)"}`,
     `Output JSON path: ${resultPath}`,
     "",
     "Writer contract used for review:",
@@ -850,6 +858,7 @@ function buildMainReviewPrompt({
     "- The final title must match the category and the Research/Title Agent finalTitle.",
     "- If topicMode is manual and a user direct topic exists, the final title and body must preserve that topic. Category or keyword must not replace it.",
     "- The title must include the core keyword naturally, have Naver-home clickability, avoid clickbait, and be answerable by the body.",
+    "- Default Naver-home title review expects a concrete reader curiosity hook, but explicit Preferred tone wins style conflicts unless it creates clickbait, unsupported claims, or a title/body mismatch.",
     "- The body must directly answer the question or promise implied by the title.",
     "",
     "Factuality review:",
@@ -865,6 +874,8 @@ function buildMainReviewPrompt({
     "",
     "Body quality review:",
     "- The introduction must be natural, the flow must be readable, and the article must not be a mechanical list.",
+    "- Unless explicit Preferred tone asks for a stricter style, return REVISION when the post reads like a stiff report, press-summary, bullet rewrite, or generic encyclopedia entry instead of a human Naver Blog explanation.",
+    "- Do not reject a stylistic choice solely for differing from the default human-blog voice when explicit Preferred tone requested that style and the article remains reader-facing and accurate.",
     "- Keyword repetition must not be excessive.",
     "- [SECTION - ...] markers are intentional app markers for Naver section headings. They are allowed in the Writer Agent article field and must not be treated as exposed internal text or a body quality failure.",
     "- The article must not expose internal words such as source candidate, source quality, prompt, JSON, agent, report, handoff, or review as reader-facing text.",
@@ -1196,9 +1207,9 @@ function buildWriterContract(researchResult = {}, context = {}) {
       recommendedStructureForContract(researchResult)
     ], 8),
     tone: firstCompactText([
-      researchResult?.writerContract?.tone,
-      context.preferredTone
-    ], "Korean Naver Blog editorial tone; practical, clear, and non-clickbait.")
+      context.preferredTone,
+      researchResult?.writerContract?.tone
+    ], "Korean Naver Blog editorial tone; human, reader-facing, practical, clear, and non-clickbait.")
   };
 }
 
