@@ -818,7 +818,7 @@ function collectForm(target = {}) {
     freshnessLevel: category?.freshnessLevel || "auto",
     searchChannel: ["blog", "web"].includes(category?.searchChannel) ? category.searchChannel : "blog",
     trustBlogAsSource: category?.trustBlogAsSource === true,
-    codexCmdPath: "codex.cmd",
+    codexCmdPath: "codex",
     primarySearchProvider: "naver",
     fallbackSearchProvider: "google",
     naverSearchUrl: DEFAULT_NAVER_SEARCH_URL,

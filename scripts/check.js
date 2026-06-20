@@ -974,7 +974,7 @@ if (writerPrompt && !writerPrompt.content.includes("Default human Naver Blog voi
   failed = true;
   console.error("src/lib/codexRunner.js: Writer Agent prompt must define the default human Naver Blog voice");
 }
-if (!sourceFiles.codexRunner.content.includes("context.preferredTone,\n      researchResult?.writerContract?.tone")) {
+if (!/context\.preferredTone,\r?\n\s+researchResult\?\.writerContract\?\.tone/.test(sourceFiles.codexRunner.content)) {
   failed = true;
   console.error("src/lib/codexRunner.js: buildWriterContract must prefer user preferredTone over Research/Title tone");
 }

@@ -103,7 +103,7 @@ async function main() {
   const naverId = String(account?.naverId || settings.naverId || "").trim();
   const blogId = String(account?.blogId || settings.blogId || naverId).trim();
   const naverPassword = String(account?.naverPassword || settings.naverPassword || "");
-  const codexCmdPath = "codex.cmd";
+  const codexCmdPath = "codex";
   const shouldPublish = settings.publishAfterGenerate === true;
   const publishVisibility = String(settings.publishVisibility || (settings.publishPrivate === false ? "public" : "private"));
   const publishPrivate = publishVisibility !== "public";

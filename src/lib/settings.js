@@ -13,7 +13,7 @@ const DEFAULT_SETTINGS = {
   topic: "",
   keyword: "",
   category: "",
-  codexCmdPath: "codex.cmd",
+  codexCmdPath: "codex",
   primarySearchProvider: "naver",
   fallbackSearchProvider: "google",
   naverSearchUrl: DEFAULT_NAVER_SEARCH_URL,

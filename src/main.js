@@ -456,7 +456,7 @@ async function startJob(form) {
   const naverId = String(form.naverId || account.naverId || "").trim();
   const blogId = String(form.blogId || account.blogId || naverId).trim();
   const naverPassword = String(form.naverPassword || account.naverPassword || "");
-  const codexCmdPath = String(form.codexCmdPath || "codex.cmd").trim();
+  const codexCmdPath = String(form.codexCmdPath || "codex").trim();
   const publishVisibility = String(form.publishVisibility || (form.publishPrivate === false ? "public" : "private"));
   const publishPrivate = publishVisibility !== "public";
   const publishScheduleMode = String(form.publishScheduleMode || "now");
@@ -993,7 +993,7 @@ app.whenReady().then(() => {
     const settings = readSettings(runtimeRoot);
     return {
       runtimeRoot,
-      codexCmdPath: "codex.cmd",
+      codexCmdPath: "codex",
       chrome: detectChromeInstall(),
       settings,
       accountStore: withAccountImageUrls(runtimeRoot, readAccountStore(runtimeRoot, settings)),
@@ -1028,7 +1028,7 @@ app.whenReady().then(() => {
     let snapshot;
     try {
       snapshot = await fetchCodexUsageSnapshot({
-        codexCmdPath: String(settings.codexCmdPath || "codex.cmd").trim(),
+        codexCmdPath: String(settings.codexCmdPath || "codex").trim(),
         cwd: runtimeRoot
       });
     } catch (error) {
