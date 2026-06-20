@@ -189,6 +189,110 @@ function buildTags(topic, keyword, articleTags) {
   return [...new Set(raw)].slice(0, 29);
 }
 
+function normalizeKeywordLane(value) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  if (!text) return "";
+  const parts = text.split(" ");
+  if (parts.length % 2 === 0) {
+    const half = parts.length / 2;
+    if (parts.slice(0, half).join(" ") === parts.slice(half).join(" ")) {
+      return parts.slice(0, half).join(" ");
+    }
+  }
+  return text;
+}
+
+function splitKeywordLanes(keyword) {
+  const seen = new Set();
+  return String(keyword || "")
+    .split(/[,\n]+/)
+    .map(normalizeKeywordLane)
+    .filter(Boolean)
+    .filter((lane) => {
+      const key = lane.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .map((phrase, index) => ({ index: index + 1, phrase }));
+}
+
+function keywordLaneFromEntry(entry) {
+  return String(entry?.topic_lane || entry?.topicLane || "").trim();
+}
+
+function buildKeywordLanePlan(keyword, history = [], { blogId = "", category = "" } = {}) {
+  const lanes = splitKeywordLanes(keyword);
+  const scopedHistory = (Array.isArray(history) ? history : [])
+    .filter((entry) => !blogId || String(entry?.blog_id || "") === blogId)
+    .filter((entry) => !category || String(entry?.category || "") === category || String(entry?.keyword || "") === String(keyword || ""));
+  const usage = new Map(lanes.map((lane) => [lane.phrase.toLowerCase(), { count: 0, lastCreateAt: "" }]));
+  for (const entry of scopedHistory) {
+    const lane = keywordLaneFromEntry(entry);
+    if (!lane) continue;
+    const key = lane.toLowerCase();
+    if (!usage.has(key)) continue;
+    const stat = usage.get(key);
+    stat.count += 1;
+    stat.lastCreateAt = [stat.lastCreateAt, String(entry.create_at || "")].sort().pop() || stat.lastCreateAt;
+  }
+  const recommended = [...lanes].sort((a, b) => {
+    const aStat = usage.get(a.phrase.toLowerCase()) || { count: 0, lastCreateAt: "" };
+    const bStat = usage.get(b.phrase.toLowerCase()) || { count: 0, lastCreateAt: "" };
+    if (aStat.count !== bStat.count) return aStat.count - bStat.count;
+    if (aStat.lastCreateAt !== bStat.lastCreateAt) return String(aStat.lastCreateAt).localeCompare(String(bStat.lastCreateAt));
+    return a.index - b.index;
+  });
+  return { lanes, recommended, usage: Object.fromEntries([...usage.entries()]) };
+}
+
+function normalizeResearchLaneResult(researchResult, lanePlan) {
+  const lanes = Array.isArray(lanePlan?.lanes) ? lanePlan.lanes : [];
+  const byIndex = new Map(lanes.map((lane) => [lane.index, lane]));
+  const byPhrase = new Map(lanes.map((lane) => [lane.phrase.toLowerCase(), lane]));
+  const selected = [];
+  for (const index of Array.isArray(researchResult?.selectedKeywordIndexes) ? researchResult.selectedKeywordIndexes : []) {
+    const lane = byIndex.get(Number(index));
+    if (lane && !selected.some((item) => item.index === lane.index)) selected.push(lane);
+  }
+  for (const phrase of [
+    researchResult?.topicLane,
+    ...(Array.isArray(researchResult?.selectedKeywordPhrases) ? researchResult.selectedKeywordPhrases : [])
+  ]) {
+    const lane = byPhrase.get(String(phrase || "").trim().toLowerCase());
+    if (lane && !selected.some((item) => item.index === lane.index)) selected.push(lane);
+  }
+  const fallback = Array.isArray(lanePlan?.recommended) ? lanePlan.recommended[0] : null;
+  if (!selected.length && fallback) selected.push(fallback);
+  const topicLane = String(researchResult?.topicLane || selected[0]?.phrase || "").trim();
+  const lanePhrases = lanes.map((lane) => lane.phrase.toLowerCase());
+  const searchQueries = (Array.isArray(researchResult?.searchQueries) ? researchResult.searchQueries : [])
+    .map((query) => String(query || "").replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .filter((query) => {
+      if (query.length > 120) return false;
+      const lower = query.toLowerCase();
+      const matchedLaneCount = lanePhrases.filter((phrase) => phrase && lower.includes(phrase)).length;
+      return matchedLaneCount <= 2;
+    })
+    .slice(0, 4);
+  return {
+    topicLane,
+    selectedKeywordIndexes: selected.map((lane) => lane.index),
+    selectedKeywordPhrases: selected.map((lane) => lane.phrase),
+    searchQueries
+  };
+}
+
+function keywordLaneHistoryFields(laneResult = {}) {
+  return {
+    topic_lane: String(laneResult.topicLane || ""),
+    selected_keyword_indexes: Array.isArray(laneResult.selectedKeywordIndexes) ? laneResult.selectedKeywordIndexes : [],
+    selected_keyword_phrases: Array.isArray(laneResult.selectedKeywordPhrases) ? laneResult.selectedKeywordPhrases : [],
+    search_queries: Array.isArray(laneResult.searchQueries) ? laneResult.searchQueries : []
+  };
+}
+
 function mergeSearchResults(...groups) {
   const merged = [];
   const seen = new Set();
@@ -482,10 +586,15 @@ async function startJob(form) {
   });
   updateStatus(jobId, "generating", "Agent 생성 준비");
 
+  let keywordLanePlan = buildKeywordLanePlan(keyword, [], { blogId, category });
+  let latestLaneResult = normalizeResearchLaneResult({}, keywordLanePlan);
+  let latestResearchTitleResult = null;
   try {
     const currentDateLabel = todayLabel();
     const history = readHistory(runtimeRoot);
     const accountHistory = history.filter((entry) => String(entry.blog_id || "") === blogId);
+    keywordLanePlan = buildKeywordLanePlan(keyword, history, { blogId, category });
+    latestLaneResult = normalizeResearchLaneResult({}, keywordLanePlan);
     const titleHistory = accountHistory
       .filter((entry) => Array.isArray(entry.embedding))
       .map((entry) => ({ title: entry.title, embedding: entry.embedding }));
@@ -528,6 +637,8 @@ async function startJob(form) {
         freshnessLevel: form.freshnessLevel || "auto",
         searchChannel: form.searchChannel || "blog",
         trustBlogAsSource: form.trustBlogAsSource === true,
+        keywordLanes: keywordLanePlan.lanes,
+        recommendedKeywordLanes: keywordLanePlan.recommended,
         agentModels,
         historyTitles: titleHistory.map((item) => item.title),
         accountImageStyle: {
@@ -551,6 +662,8 @@ async function startJob(form) {
           emit("accounts:update", withAccountImageUrls(runtimeRoot, saved));
         },
         onResearchTitle: (researchResult) => {
+          latestResearchTitleResult = researchResult || null;
+          latestLaneResult = normalizeResearchLaneResult(researchResult, keywordLanePlan);
           const selectedTitle = String(researchResult.finalTitle || researchResult.selectedTitle || "").trim();
           emit("job:selectedTitle", {
             jobId,
@@ -563,6 +676,9 @@ async function startJob(form) {
           });
           if (selectedTitle) {
             safeLog(jobId, `선정 제목: ${selectedTitle}`, "info", "main");
+          }
+          if (latestLaneResult.topicLane) {
+            safeLog(jobId, `선택 키워드 lane: ${latestLaneResult.topicLane}`, "info", "research");
           }
         },
         onTokenUsage: (usage) => {
@@ -598,7 +714,9 @@ async function startJob(form) {
             keyword,
             topicMode: form.topicMode || "manual"
           });
-          const searchKeyword = keyword || category;
+          const laneResult = normalizeResearchLaneResult(researchResult, keywordLanePlan);
+          latestLaneResult = laneResult;
+          const searchKeyword = laneResult.selectedKeywordPhrases.join(", ") || keyword || category;
           safeLog(jobId, `Research/Title Agent 요청으로 검색 후보 수집 시작: ${researchResult.searchNeed || "normal"}`, "info", "research");
           const searchResults = await collectSearchResults({
             topic: searchTopic,
@@ -612,6 +730,7 @@ async function startJob(form) {
               ...(Array.isArray(researchResult.mustCover) ? researchResult.mustCover : []),
               ...(Array.isArray(researchResult.uncertainItems) ? researchResult.uncertainItems : [])
             ].filter(Boolean).join(" "),
+            searchQueries: laneResult.searchQueries,
             searchNeed: researchResult.searchNeed || "",
             topicMode: form.topicMode || "manual",
             primaryProvider: form.primarySearchProvider || "naver",
@@ -655,6 +774,8 @@ async function startJob(form) {
     persistCodexRateLimits(runtimeRoot, jobTokenUsage.rateLimits);
     const sourceFailureReason = detectCodexSourceFailure(codexResult);
     if (sourceFailureReason) {
+      latestResearchTitleResult = codexResult.researchTitleResult || latestResearchTitleResult;
+      latestLaneResult = normalizeResearchLaneResult(latestResearchTitleResult, keywordLanePlan);
       const sourceError = new Error(sourceFailureReason);
       sourceError.failurePhase = codexResult.failurePhase || (codexResult.researchTitleResult ? "research" : "");
       throw sourceError;
@@ -693,6 +814,8 @@ async function startJob(form) {
         title: agentResult.title,
         topic,
         keyword,
+        category,
+        ...keywordLaneHistoryFields(latestLaneResult),
         status: "duplicate_retry",
         harness_version: "lean-agent-v1",
         final_verdict: "REVISION",
@@ -777,6 +900,8 @@ async function startJob(form) {
       title: agentResult.title,
       topic,
       keyword,
+      category,
+      ...keywordLaneHistoryFields(latestLaneResult),
       status: publishStatus,
       harness_version: "lean-agent-v1",
       final_verdict: "PASS",
@@ -826,11 +951,14 @@ async function startJob(form) {
       title: "",
       topic,
       keyword,
+      category,
+      ...keywordLaneHistoryFields(latestLaneResult),
       status: failedStatus,
       embedding_model: "local-hash-v1",
       embedding,
       token_total: jobTokenUsage.total,
       failure_phase: error.failurePhase || "",
+      research_title: latestResearchTitleResult?.finalTitle || latestResearchTitleResult?.selectedTitle || "",
       reason: error.message
     });
     safeLog(jobId, error.message, "error");

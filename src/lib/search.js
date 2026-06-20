@@ -4,6 +4,7 @@ const https = require("node:https");
 const MAX_RESPONSE_CHARS = 1_500_000;
 const MAX_EXCERPT_CHARS = 1400;
 const MAX_SELECTED_CONTENT_RESULTS = 20;
+const MAX_SEARCH_QUERY_VARIANTS = 4;
 const CONTENT_FETCH_CONCURRENCY = 4;
 const CANDIDATE_FETCH_TIMEOUT_MS = 20000;
 
@@ -227,7 +228,8 @@ function evidenceText(options) {
     options.keyword,
     options.category,
     options.publishPurpose,
-    options.researchGuidance
+    options.researchGuidance,
+    normalizeSearchQueries(options.searchQueries).join(" ")
   ].filter(Boolean).join(" ");
 }
 
@@ -294,7 +296,10 @@ function candidateMatchesSearchIntent(candidate, options) {
   const searchText = `${candidate.title || ""} ${candidate.url || ""}`.toLowerCase();
   const keywordTokens = tokenize(options.keyword || "");
   const topicTokens = tokenize(compactTopicForSearch(options.topic || "", options.keyword || ""));
-  const requiredTokens = keywordTokens.length ? keywordTokens : topicTokens.slice(0, 4);
+  const queryTokens = tokenize(normalizeSearchQueries(options.searchQueries).join(" "));
+  const requiredTokens = uniqueStrings([...keywordTokens, ...topicTokens, ...queryTokens])
+    .filter((token) => token.length > 2 || /[0-9]/.test(token))
+    .slice(0, 16);
   if (!requiredTokens.length) return true;
   return requiredTokens.some((token) => searchText.includes(token.toLowerCase()));
 }
@@ -382,7 +387,10 @@ function selectCommonTokens(candidates, options) {
 function scoreCandidate(candidate, commonTokens, options, profile = buildSearchProfile(options)) {
   const textTokens = new Set(tokenize(`${candidate.title} ${candidate.excerpt || ""}`));
   const topicTokens = new Set(tokenize(options.topic || ""));
-  const keywordTokens = new Set(tokenize(options.keyword || ""));
+  const keywordTokens = new Set(tokenize([
+    options.keyword || "",
+    normalizeSearchQueries(options.searchQueries).join(" ")
+  ].filter(Boolean).join(" ")));
   const signals = candidateSignals(candidate, profile);
   let score = 0;
   const matchedTerms = [];
@@ -502,14 +510,44 @@ function normalizeSearchChannel(value) {
     : "blog";
 }
 
+function uniqueStrings(values) {
+  const seen = new Set();
+  const output = [];
+  for (const value of values) {
+    const normalized = String(value || "").replace(/\s+/g, " ").trim();
+    const key = normalized.toLowerCase();
+    if (!normalized || seen.has(key)) continue;
+    seen.add(key);
+    output.push(normalized);
+  }
+  return output;
+}
+
+function normalizeSearchQueries(searchQueries) {
+  const rawQueries = Array.isArray(searchQueries)
+    ? searchQueries
+    : String(searchQueries || "").split(/\n+/);
+  return uniqueStrings(rawQueries)
+    .filter((query) => query.length >= 3)
+    .map((query) => query.slice(0, 140).trim())
+    .slice(0, MAX_SEARCH_QUERY_VARIANTS);
+}
+
 function naverSearchTemplateFor(options = {}) {
   return normalizeSearchChannel(options.searchChannel) === "web"
     ? NAVER_WEB_SEARCH_URL
     : NAVER_BLOG_SEARCH_URL;
 }
 
-function buildSearchUrl(provider, template, topic, keyword, topicMode, querySuffix = "") {
-  const queryText = buildQueryText(topic, keyword, topicMode, querySuffix);
+function buildSearchUrl(provider, template, topic, keyword, topicMode, querySuffix = "", queryOverride = "") {
+  const queryText = queryOverride
+    ? [String(queryOverride || "").replace(/\s+/g, " ").trim(), querySuffix]
+      .filter(Boolean)
+      .join(" ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 260)
+    : buildQueryText(topic, keyword, topicMode, querySuffix);
   const query = encodeURIComponent(queryText);
   if (template && template.includes("{query}")) {
     return template.replace("{query}", query);
@@ -520,9 +558,17 @@ function buildSearchUrl(provider, template, topic, keyword, topicMode, querySuff
   return `https://www.google.com/search?q=${query}&num=20&hl=ko`;
 }
 
-async function providerSearch(provider, options, querySuffix = "") {
+async function providerSearch(provider, options, querySuffix = "", queryOverride = "") {
   const template = provider === "naver" ? naverSearchTemplateFor(options) : options.googleSearchUrl;
-  const url = buildSearchUrl(provider, template, options.topic, options.keyword, options.topicMode, querySuffix);
+  const url = buildSearchUrl(
+    provider,
+    template,
+    options.topic,
+    options.keyword,
+    options.topicMode,
+    querySuffix,
+    queryOverride
+  );
   const html = await fetchText(url);
   return parseLinks(html, provider);
 }
@@ -574,18 +620,28 @@ function buildQueryText(topic, keyword, topicMode, querySuffix = "") {
     .slice(0, 260);
 }
 
-async function collectProviderCandidates(providers, options, log, querySuffix = "") {
+async function collectProviderCandidates(providers, options, log, querySuffix = "", control = {}) {
   const all = [];
   for (const provider of providers) {
     if (!["naver", "google"].includes(provider)) continue;
     try {
       log(`${provider.toUpperCase()} 검색을 시도합니다.`);
-      const results = await providerSearch(provider, options, querySuffix);
-      all.push(...results);
+      const optionVariants = provider === "naver" && control.includeNaverWebFallback === true
+        ? [options, { ...options, searchChannel: "web" }]
+        : [options];
+      for (const optionVariant of optionVariants) {
+        const results = await providerSearch(
+          provider,
+          optionVariant,
+          querySuffix,
+          control.queryOverride || ""
+        );
+        all.push(...results);
+      }
     } catch (error) {
       log(`${provider.toUpperCase()} 검색 실패: ${error.message}`);
     }
-    if (all.length >= 20) break;
+    if (all.length >= 20 && control.forceAllProviders !== true) break;
   }
   return all;
 }
@@ -595,7 +651,30 @@ async function collectSearchResults(options, log = () => {}) {
   const fallback = String(options.fallbackProvider || "google").toLowerCase();
   const providers = [primary, fallback];
   const profile = buildSearchProfile(options);
-  let all = await collectProviderCandidates(providers, options, log);
+  const queryVariants = normalizeSearchQueries(options.searchQueries);
+  const providerControl = {
+    forceAllProviders: profile.strictEvidence,
+    includeNaverWebFallback: profile.strictEvidence && normalizeSearchChannel(options.searchChannel) === "blog"
+  };
+  const collectRawCandidates = async (querySuffix = "") => {
+    if (!queryVariants.length) {
+      return collectProviderCandidates(providers, options, log, querySuffix, providerControl);
+    }
+    const collected = [];
+    for (const query of queryVariants) {
+      log(`Narrow search query: ${query}`);
+      const queryResults = await collectProviderCandidates(
+        providers,
+        options,
+        log,
+        querySuffix,
+        { ...providerControl, queryOverride: query }
+      );
+      collected.push(...queryResults);
+    }
+    return collected;
+  };
+  let all = await collectRawCandidates();
 
   const seen = new Set();
   let candidates = all
@@ -650,7 +729,7 @@ async function collectSearchResults(options, log = () => {}) {
     const suffix = focusedOfficialSearchSuffix(options, profile);
     if (suffix) {
       log("현재성/신뢰 근거가 필요한 검색으로 판단되어 보강 검색합니다.", "info");
-      const refined = await collectProviderCandidates(providers, options, log, suffix);
+      const refined = await collectRawCandidates(suffix);
       for (const item of refined) {
         const key = item.url.replace(/[#?].*$/, "");
         if (seen.has(key)) continue;
@@ -751,6 +830,7 @@ module.exports = {
     isLowValueResult,
     isUnsupportedContentUrl,
     compactTopicForSearch,
+    normalizeSearchQueries,
     candidateMatchesSearchIntent,
     isStrongCandidate,
     hasDirectRelevance,

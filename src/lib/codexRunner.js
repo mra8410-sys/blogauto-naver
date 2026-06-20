@@ -545,6 +545,41 @@ function parseProgressLine(text, options = {}) {
   return labels[code] || match[1].trim();
 }
 
+function compactSearchResultsForPrompt(searchResults, {
+  maxResults = 12,
+  excerptChars = 700
+} = {}) {
+  return (Array.isArray(searchResults) ? searchResults : [])
+    .slice(0, maxResults)
+    .map((item, index) => {
+      const relevance = item?.relevance || {};
+      return {
+        sourceId: String(item?.sourceId || `source-${index + 1}`),
+        provider: String(item?.provider || ""),
+        title: String(item?.title || ""),
+        url: String(item?.url || ""),
+        fetchedUrl: String(item?.fetchedUrl || ""),
+        contentLength: Number(item?.contentLength || 0),
+        excerpt: String(item?.excerpt || "").replace(/\s+/g, " ").trim().slice(0, excerptChars),
+        relevance: {
+          score: Number(relevance.score || 0),
+          topicMatchedTerms: Array.isArray(relevance.topicMatchedTerms) ? relevance.topicMatchedTerms.slice(0, 8) : [],
+          keywordMatchedTerms: Array.isArray(relevance.keywordMatchedTerms) ? relevance.keywordMatchedTerms.slice(0, 8) : [],
+          officialSource: relevance.officialSource === true,
+          institutionalSource: relevance.institutionalSource === true,
+          blogTrustedSource: relevance.blogTrustedSource === true,
+          lowTrustSource: relevance.lowTrustSource === true,
+          currentFactSignal: relevance.currentFactSignal === true,
+          strictEvidence: relevance.strictEvidence === true
+        }
+      };
+    });
+}
+
+function isMissingCodexResultFileError(error) {
+  return /Codex result file was not created:/i.test(String(error?.message || ""));
+}
+
 function buildPrompt({
   topic,
   keyword,
@@ -641,7 +676,10 @@ function buildPrompt({
     researchSearchNeed === "skip"
       ? "Research/Title Agent judged that external search can be skipped. Use the Writer Contract as the writing boundary, avoid current/date-bound claims, and do not invent specific facts."
       : "Use the extracted source candidates below as the factual basis. Each candidate may include title, url, fetchedUrl, excerpt, contentLength, and relevance.",
-    JSON.stringify(searchResults, null, 2),
+    JSON.stringify(compactSearchResultsForPrompt(searchResults, {
+      maxResults: 8,
+      excerptChars: 700
+    }), null, 2),
     researchTitleResult ? "Full Research/Title handoff for factual support only:" : "",
     researchTitleResult ? JSON.stringify(researchTitleResult, null, 2) : "",
     "",
@@ -740,10 +778,14 @@ function buildResearchTitlePrompt({
   excludedTopics = "",
   publishPurpose = "",
   preferredTone = "",
-  freshnessLevel = "auto"
+  freshnessLevel = "auto",
+  keywordLanes = [],
+  recommendedKeywordLanes = []
 }) {
   const resultPath = path.join(jobDir, "research-title-result.json");
   const hasSearchCandidates = Array.isArray(searchResults) && searchResults.length > 0;
+  const laneList = Array.isArray(keywordLanes) ? keywordLanes : [];
+  const recommendedLaneList = Array.isArray(recommendedKeywordLanes) ? recommendedKeywordLanes : [];
   return [
     "You are the Research/Title Agent for a Korean Naver Blog automation app.",
     "Do not write the article body. Do not generate images.",
@@ -757,6 +799,15 @@ function buildResearchTitlePrompt({
     `Preferred tone: ${preferredTone || "(agent decides)"}`,
     "- Tone priority: if Preferred tone is provided, it is the highest style signal for finalTitle and writerContract.tone. Default hook and human-blog guidance apply only when they do not conflict with Preferred tone.",
     `Freshness level: ${freshnessLevel || "auto"}`,
+    "",
+    "Keyword lanes:",
+    JSON.stringify(laneList, null, 2),
+    "Recommended keyword lane order from HISTORY:",
+    JSON.stringify(recommendedLaneList, null, 2),
+    "- In auto topic mode, treat Category keyword as a lane pool, not as one search query.",
+    "- Select one narrow topicLane first, preferably from the recommended order, then derive the title and searchQueries inside that lane.",
+    "- Do not repeatedly choose the original first keyword just because it appears first. HISTORY order is provided to reduce repetition.",
+    "- Do not combine all keyword lanes into one search query.",
     `Output JSON path: ${resultPath}`,
     "",
     "Progress logging:",
@@ -772,7 +823,8 @@ function buildResearchTitlePrompt({
       ? ""
       : "- When search candidates are absent, do not perform web searches, browser actions, network fetches, or shell/file reads for research. Decide searchNeed from the user's category/topic/keyword only, then write the output JSON. Use shell only if it is needed to write the JSON result file.",
     "- If a user direct topic exists and topicMode is manual, preserve that topic. Search results can refine expression and verify facts, but must not replace the user's topic.",
-    "- If no direct topic exists or topicMode is auto, derive one narrow candidate topic from Category and Category keyword. If current facts are required, return searchNeed light/normal/strict and wait for app-provided search candidates instead of verifying facts yourself.",
+    "- If no direct topic exists or topicMode is auto, derive one narrow candidate topic from a single Keyword lane. If current facts are required, return searchNeed light/normal/strict and wait for app-provided search candidates instead of verifying facts yourself.",
+    "- Treat Current writing date as an internal freshness reference, not as title material. Put a year/month in finalTitle only when that date is part of the confirmed event, policy, product, deadline, edition, or source-backed fact itself.",
     "- Determine search need as one of: skip, light, normal, strict. Map freshness level low/medium/high to lighter or stricter research, but official/current facts still require strict handling.",
     "- Use searchNeed \"skip\" only for stable concept/explanation/opinion/experience-style topics that can be written safely without current facts.",
     "- Use searchNeed \"light\", \"normal\", or \"strict\" when current search flow, NAVER exposure, Google/official fact checks, or official/current sources are needed.",
@@ -787,7 +839,10 @@ function buildResearchTitlePrompt({
     "",
     `Search candidates already collected: ${hasSearchCandidates ? "yes" : "no"}`,
     "Search/source candidates:",
-    JSON.stringify(searchResults, null, 2),
+    JSON.stringify(compactSearchResultsForPrompt(searchResults, {
+      maxResults: 6,
+      excerptChars: 420
+    }), null, 2),
     "",
     "Source quality summary:",
     JSON.stringify(sourceQuality || { status: "unknown" }, null, 2),
@@ -797,10 +852,15 @@ function buildResearchTitlePrompt({
     "",
     "Required output:",
     "- Write a UTF-8 JSON file at the exact Output JSON path.",
-    "- JSON shape: { \"status\": \"PASS\" | \"REVISION\" | \"BLOCK\", \"failureReason\": string, \"finalTitle\": string, \"topicThesis\": string, \"directTopicPreserved\": boolean, \"factBased\": boolean, \"searchNeed\": \"skip\" | \"light\" | \"normal\" | \"strict\", \"searchFlowSummary\": string, \"repeatedTopics\": string[], \"competitionGaps\": string[], \"coreQuestions\": string[], \"mustCover\": string[], \"avoidDirections\": string[], \"confirmedFacts\": string[], \"uncertainItems\": string[], \"usableSources\": [{\"sourceId\": string, \"title\": string, \"url\": string, \"reason\": string}], \"titleCandidates\": [{\"title\": string, \"reason\": string, \"risk\": string}], \"writerBrief\": string, \"writerContract\": { \"articleMission\": string, \"selectedTitle\": string, \"topicThesis\": string, \"targetReader\": string, \"readerPromise\": string, \"firstSectionFocus\": string, \"mustAnswer\": string[], \"mustCover\": string[], \"mustNotDo\": string[], \"confirmedFacts\": string[], \"uncertainItems\": string[], \"sourceBoundaries\": string[], \"recommendedStructure\": string[], \"tone\": string }, \"notes\": string[] }.",
+    "- JSON shape: { \"status\": \"PASS\" | \"REVISION\" | \"BLOCK\", \"failureReason\": string, \"finalTitle\": string, \"topicThesis\": string, \"topicLane\": string, \"selectedKeywordIndexes\": number[], \"selectedKeywordPhrases\": string[], \"searchQueries\": string[], \"directTopicPreserved\": boolean, \"factBased\": boolean, \"searchNeed\": \"skip\" | \"light\" | \"normal\" | \"strict\", \"searchFlowSummary\": string, \"repeatedTopics\": string[], \"competitionGaps\": string[], \"coreQuestions\": string[], \"mustCover\": string[], \"avoidDirections\": string[], \"confirmedFacts\": string[], \"uncertainItems\": string[], \"usableSources\": [{\"sourceId\": string, \"title\": string, \"url\": string, \"reason\": string}], \"titleCandidates\": [{\"title\": string, \"reason\": string, \"risk\": string}], \"writerBrief\": string, \"writerContract\": { \"articleMission\": string, \"selectedTitle\": string, \"topicThesis\": string, \"targetReader\": string, \"readerPromise\": string, \"firstSectionFocus\": string, \"mustAnswer\": string[], \"mustCover\": string[], \"mustNotDo\": string[], \"confirmedFacts\": string[], \"uncertainItems\": string[], \"sourceBoundaries\": string[], \"recommendedStructure\": string[], \"tone\": string }, \"notes\": string[] }.",
+    "- topicLane, selectedKeywordIndexes, selectedKeywordPhrases, and searchQueries are required in auto topic mode. searchQueries must be narrow and must not contain the full Category keyword pool.",
     "- If status is BLOCK, keep finalTitle empty unless a safe non-publishable working title is useful, and explain failureReason concisely in Korean.",
     "- If status is PASS or REVISION, finalTitle must be a Korean Naver Blog title that is click-worthy without exaggeration.",
-    "- Default Naver-home title style: use the core keyword plus a concrete reader curiosity hook such as 이유, 체크할 점, 달라진 점, 대상, 조건, 실수, or 방문 전 확인. Avoid vague guide titles, keyword stuffing, and unsupported sensational words.",
+    "- Naver-home title judgment: act like an editor choosing one homepage card, not a template filler. The title should combine a concrete subject, a confirmed event/action/tension, and the reader curiosity created by this specific topic.",
+    "- Build at least three titleCandidates from different editorial angles before choosing finalTitle: event-first, reader-question-first, and consequence-first. Pick the one that feels least generic and most tied to the verified topic.",
+    "- A good title should fail if the named entity/event can be swapped out and the title still works for many unrelated posts. Rewrite until the title depends on the actual subject, source-backed facts, and reader promise.",
+    "- Do not append a generic freshness or preparation suffix just to make the title look timely. Avoid vague guide-title cadence, keyword stuffing, and unsupported sensational words.",
+    "- If Preferred tone conflicts with the default Naver-home judgment, Preferred tone wins.",
     "- Print one final line after writing the file: BLOGAUTO_RESULT_READY"
   ].filter((line) => line !== "").join("\n");
 }
@@ -858,7 +918,8 @@ function buildMainReviewPrompt({
     "- The final title must match the category and the Research/Title Agent finalTitle.",
     "- If topicMode is manual and a user direct topic exists, the final title and body must preserve that topic. Category or keyword must not replace it.",
     "- The title must include the core keyword naturally, have Naver-home clickability, avoid clickbait, and be answerable by the body.",
-    "- Default Naver-home title review expects a concrete reader curiosity hook, but explicit Preferred tone wins style conflicts unless it creates clickbait, unsupported claims, or a title/body mismatch.",
+    "- Naver-home title review expects an editorial homepage-card title tied to the specific subject, event/action/tension, and reader promise. It must not pass only because it has a generic hook phrase.",
+    "- Date words in the title must be source-backed story material, not decoration from Current writing date. Explicit Preferred tone wins style conflicts unless it creates clickbait, unsupported claims, or a title/body mismatch.",
     "- The body must directly answer the question or promise implied by the title.",
     "",
     "Factuality review:",
@@ -1880,17 +1941,36 @@ async function runCodexGeneration(options, log = () => {}) {
       searchResults: Array.isArray(searchPayload?.searchResults) ? searchPayload.searchResults : [],
       sourceQuality: searchPayload?.sourceQuality || { status: "unknown" }
     };
-    researchResult = await runCodexTask({
-      options: effectiveOptions,
-      prompt: buildResearchTitlePrompt(effectiveOptions),
-      promptFileName: researchSearchRound === 1 ? "research-title-prompt.txt" : `research-title-search-${researchSearchRound}-prompt.txt`,
-      resultFileName: researchSearchRound === 1 ? "research-title-result.json" : `research-title-search-${researchSearchRound}-result.json`,
-      log,
-      tokenOffset: totalTokens,
-      grossTokenOffset: totalGrossTokens,
-      agentTokenOffset: agentTokenTotals.research,
-      agent: "research"
-    });
+    try {
+      researchResult = await runCodexTask({
+        options: effectiveOptions,
+        prompt: buildResearchTitlePrompt(effectiveOptions),
+        promptFileName: researchSearchRound === 1 ? "research-title-prompt.txt" : `research-title-search-${researchSearchRound}-prompt.txt`,
+        resultFileName: researchSearchRound === 1 ? "research-title-result.json" : `research-title-search-${researchSearchRound}-result.json`,
+        log,
+        tokenOffset: totalTokens,
+        grossTokenOffset: totalGrossTokens,
+        agentTokenOffset: agentTokenTotals.research,
+        agent: "research"
+      });
+    } catch (error) {
+      if (!isMissingCodexResultFileError(error)) {
+        throw error;
+      }
+      const reason = compactTextList([
+        "추가 검색 후 Research/Title Agent가 결과 파일을 생성하지 못했습니다.",
+        effectiveOptions.sourceQuality?.reason,
+        researchResult?.failureReason
+      ]).join(" / ");
+      log(reason, "warn", "research");
+      researchResult = {
+        ...researchResult,
+        status: researchStatus || researchResult?.status || "BLOCK",
+        failureReason: researchResult?.failureReason || reason,
+        notes: compactTextList([researchResult?.notes, reason])
+      };
+      break;
+    }
     totalTokens += Number(researchResult.tokenUsage?.total || 0);
     totalGrossTokens += Number(researchResult.tokenUsage?.grossTotal || researchResult.tokenUsage?.total || 0);
     agentTokenTotals.research += Number(researchResult.tokenUsage?.total || 0);

@@ -273,6 +273,28 @@ assertCondition(
   typeof longBroadcastQuery === "string" && longBroadcastQuery.length <= 260 && !longBroadcastQuery.includes("6시내고향 맛집"),
   "src/lib/search.js: automatic search queries must be compacted instead of sending every category keyword"
 );
+assertCondition(
+  JSON.stringify(searchPrivate.normalizeSearchQueries?.([
+    "OpenAI copyright lawsuit latest filing",
+    "OpenAI copyright lawsuit latest filing",
+    "The New York Times OpenAI Microsoft copyright lawsuit",
+    "AI copyright court document 2026",
+    "OpenAI settlement status 2026"
+  ])) === JSON.stringify([
+    "OpenAI copyright lawsuit latest filing",
+    "The New York Times OpenAI Microsoft copyright lawsuit",
+    "AI copyright court document 2026",
+    "OpenAI settlement status 2026"
+  ]),
+  "src/lib/search.js: Research/Title searchQueries must stay deduped separate query variants"
+);
+assertCondition(
+  sourceFiles.search.content.includes("queryOverride")
+    && sourceFiles.search.content.includes("Narrow search query:")
+    && sourceFiles.search.content.includes("includeNaverWebFallback")
+    && sourceFiles.search.content.includes("forceAllProviders: profile.strictEvidence"),
+  "src/lib/search.js: strict search must run separate Research/Title query variants and avoid early provider cutoff"
+);
 const strictSearchOptions = {
   searchNeed: "strict",
   topic: "2026 소상공인 정책자금 신청 대상",
@@ -379,6 +401,32 @@ const searchCallback = extractBlockAfter(sourceFiles.main, "onSearchNeeded: asyn
 if (searchCallback && !searchCallback.content.includes("selectSearchTopicForResearch(researchResult")) {
   failed = true;
   console.error("src/main.js: onSearchNeeded must use compact search topic selection instead of raw topicThesis");
+}
+if (
+  !sourceFiles.main.content.includes("function splitKeywordLanes")
+  || !sourceFiles.main.content.includes("function buildKeywordLanePlan")
+  || !sourceFiles.main.content.includes("function keywordLaneHistoryFields")
+) {
+  failed = true;
+  console.error("src/main.js: automatic keyword pools must be split into history-aware keyword lanes");
+}
+if (
+  searchCallback
+  && (!searchCallback.content.includes("normalizeResearchLaneResult(researchResult, keywordLanePlan)")
+    || !searchCallback.content.includes("searchQueries: laneResult.searchQueries")
+    || searchCallback.content.includes("laneResult.searchQueries.join")
+    || searchCallback.content.includes("const searchKeyword = keyword || category"))
+) {
+  failed = true;
+  console.error("src/main.js: search must use selected keyword lane/searchQueries instead of the full category keyword pool");
+}
+if (
+  !sourceFiles.main.content.includes("topic_lane")
+  || !sourceFiles.main.content.includes("selected_keyword_phrases")
+  || !sourceFiles.main.content.includes("search_queries")
+) {
+  failed = true;
+  console.error("src/main.js: keyword lane choices must always be written to blog history");
 }
 for (const index of allIndexesOf(sourceFiles.main.content, "collectSearchResults({")) {
   if (!searchCallback || index < searchCallback.start || index > searchCallback.end) {
@@ -697,9 +745,41 @@ if (researchTitlePrompt && !researchTitlePrompt.content.includes("Preferred tone
   failed = true;
   console.error("src/lib/codexRunner.js: Research/Title Agent must prioritize explicit Preferred tone for title and writerContract style");
 }
-if (researchTitlePrompt && !researchTitlePrompt.content.includes("Default Naver-home title style")) {
+if (
+  researchTitlePrompt
+  && (!researchTitlePrompt.content.includes("Naver-home title judgment")
+    || !researchTitlePrompt.content.includes("not a template filler")
+    || !researchTitlePrompt.content.includes("Build at least three titleCandidates from different editorial angles")
+    || !researchTitlePrompt.content.includes("Treat Current writing date as an internal freshness reference")
+    || !researchTitlePrompt.content.includes("Do not append a generic freshness or preparation suffix"))
+) {
   failed = true;
-  console.error("src/lib/codexRunner.js: Research/Title Agent must define the default Naver-home hook title style");
+  console.error("src/lib/codexRunner.js: Research/Title Agent must use an editorial Naver-home title judgment rubric instead of a fixed hook template");
+}
+if (
+  !sourceFiles.codexRunner.content.includes("Keyword lanes:")
+  || !sourceFiles.codexRunner.content.includes("Recommended keyword lane order from HISTORY")
+  || !sourceFiles.codexRunner.content.includes("topicLane")
+  || !sourceFiles.codexRunner.content.includes("selectedKeywordIndexes")
+  || !sourceFiles.codexRunner.content.includes("searchQueries")
+) {
+  failed = true;
+  console.error("src/lib/codexRunner.js: Research/Title Agent must select a keyword lane and return searchQueries");
+}
+if (
+  !sourceFiles.codexRunner.content.includes("function compactSearchResultsForPrompt")
+  || !sourceFiles.codexRunner.content.includes("maxResults: 6")
+  || !sourceFiles.codexRunner.content.includes("excerptChars: 420")
+) {
+  failed = true;
+  console.error("src/lib/codexRunner.js: Research/Title search rerun prompt must use compact narrowed source candidates");
+}
+if (
+  !sourceFiles.codexRunner.content.includes("function isMissingCodexResultFileError")
+  || !sourceFiles.codexRunner.content.includes("추가 검색 후 Research/Title Agent가 결과 파일을 생성하지 못했습니다.")
+) {
+  failed = true;
+  console.error("src/lib/codexRunner.js: missing Research/Title rerun result files must fall back to the existing research verdict");
 }
 const mainReviewPrompt = extractFunctionBlock(sourceFiles.codexRunner, "function buildMainReviewPrompt", "Main Agent final review prompt");
 if (mainReviewPrompt && !mainReviewPrompt.content.includes("not only title/article matching")) {
@@ -747,9 +827,15 @@ if (mainReviewPrompt && !mainReviewPrompt.content.includes("not how the agent ve
   failed = true;
   console.error("src/lib/codexRunner.js: Main Agent final review must reject research-process style article leads");
 }
-if (mainReviewPrompt && !mainReviewPrompt.content.includes("explicit Preferred tone wins style conflicts")) {
+if (
+  mainReviewPrompt
+  && (!mainReviewPrompt.content.includes("homepage-card title tied to the specific subject")
+    || !mainReviewPrompt.content.includes("must not pass only because it has a generic hook phrase")
+    || !mainReviewPrompt.content.includes("Date words in the title must be source-backed story material")
+    || !mainReviewPrompt.content.includes("Explicit Preferred tone wins style conflicts"))
+) {
   failed = true;
-  console.error("src/lib/codexRunner.js: Main Agent title review must let explicit Preferred tone win style conflicts");
+  console.error("src/lib/codexRunner.js: Main Agent title review must reject generic hook templates while preserving Preferred tone priority");
 }
 if (mainReviewPrompt && !mainReviewPrompt.content.includes("reads like a stiff report")) {
   failed = true;
