@@ -597,7 +597,9 @@ function renderCategories() {
     const optionSummary = [
       category.excludedTopics ? `제외: ${category.excludedTopics}` : "",
       category.preferredTone ? `톤: ${category.preferredTone}` : "",
-      category.freshnessLevel && category.freshnessLevel !== "auto" ? `최신성: ${category.freshnessLevel}` : ""
+      category.freshnessLevel && category.freshnessLevel !== "auto" ? `최신성: ${category.freshnessLevel}` : "",
+      category.searchChannel === "web" ? "검색: 웹" : "검색: 블로그",
+      category.trustBlogAsSource ? "블로그 신뢰" : ""
     ].filter(Boolean).join(" · ");
     const row = document.createElement("div");
     row.className = `category-row${state.editingCategoryId === category.id ? " selected" : ""}`;
@@ -699,6 +701,10 @@ function fillCategoryForm(category = null) {
   $("#categoryPublishPurpose").value = category?.publishPurpose || "";
   $("#categoryPreferredTone").value = category?.preferredTone || "";
   $("#categoryFreshnessLevel").value = category?.freshnessLevel || "auto";
+  $("#categorySearchChannel").value = ["blog", "web"].includes(category?.searchChannel)
+    ? category.searchChannel
+    : "blog";
+  $("#categoryTrustBlogAsSource").checked = category?.trustBlogAsSource === true;
 }
 
 function clearCategoryForm() {
@@ -803,6 +809,8 @@ function collectForm(target = {}) {
     publishPurpose: category?.publishPurpose || "",
     preferredTone: category?.preferredTone || "",
     freshnessLevel: category?.freshnessLevel || "auto",
+    searchChannel: ["blog", "web"].includes(category?.searchChannel) ? category.searchChannel : "blog",
+    trustBlogAsSource: category?.trustBlogAsSource === true,
     codexCmdPath: "codex.cmd",
     primarySearchProvider: "naver",
     fallbackSearchProvider: "google",
@@ -1363,6 +1371,8 @@ async function boot() {
     const publishPurpose = $("#categoryPublishPurpose").value.trim();
     const preferredTone = $("#categoryPreferredTone").value.trim();
     const freshnessLevel = $("#categoryFreshnessLevel").value || "auto";
+    const searchChannel = $("#categorySearchChannel").value || "blog";
+    const trustBlogAsSource = $("#categoryTrustBlogAsSource").checked === true;
     if (!account) return;
     if (!name || !keyword) {
       addLog({
@@ -1385,6 +1395,8 @@ async function boot() {
       existing.publishPurpose = publishPurpose;
       existing.preferredTone = preferredTone;
       existing.freshnessLevel = freshnessLevel;
+      existing.searchChannel = searchChannel;
+      existing.trustBlogAsSource = trustBlogAsSource;
       existing.checked = true;
     } else if (account.categories.some((category) => category.name === name)) {
       addLog({
@@ -1403,6 +1415,8 @@ async function boot() {
         publishPurpose,
         preferredTone,
         freshnessLevel,
+        searchChannel,
+        trustBlogAsSource,
         checked: true
       });
     }
@@ -1461,7 +1475,9 @@ async function boot() {
       "categoryExcludedTopics",
       "categoryPublishPurpose",
       "categoryPreferredTone",
-      "categoryFreshnessLevel"
+      "categoryFreshnessLevel",
+      "categorySearchChannel",
+      "categoryTrustBlogAsSource"
     ].includes(control.id)) {
       return;
     }

@@ -202,6 +202,26 @@ assertCondition(
   sourceFiles.search.content.includes(naverBlogSearchFallback),
   "src/lib/search.js: Naver search fallback URL must use the blog tab"
 );
+assertCondition(
+  sourceFiles.accountStore.content.includes("searchChannel: normalizeSearchChannel(category?.searchChannel)")
+    && sourceFiles.accountStore.content.includes("trustBlogAsSource: category?.trustBlogAsSource === true"),
+  "src/lib/accountStore.js: category search channel and blog trust settings must be normalized"
+);
+assertCondition(
+  sourceFiles.rendererIndex.content.includes("categorySearchChannel")
+    && sourceFiles.rendererIndex.content.includes("categoryTrustBlogAsSource"),
+  "src/renderer/index.html: category manager must expose search channel and blog trust controls"
+);
+assertCondition(
+  sourceFiles.rendererApp.content.includes("searchChannel: [\"blog\", \"web\"].includes(category?.searchChannel) ? category.searchChannel : \"blog\"")
+    && sourceFiles.rendererApp.content.includes("trustBlogAsSource: category?.trustBlogAsSource === true"),
+  "src/renderer/app.js: category search settings must be included in collected run form"
+);
+assertCondition(
+  sourceFiles.main.content.includes("searchChannel: form.searchChannel || \"blog\"")
+    && sourceFiles.main.content.includes("trustBlogAsSource: form.trustBlogAsSource === true"),
+  "src/main.js: category search settings must flow into generation and search callbacks"
+);
 
 assertCondition(
   typeof searchLib.summarizeSourceQuality === "function",
@@ -215,6 +235,11 @@ assertCondition(
   searchPrivate.isUnsupportedContentUrl?.("https://example.com/report.xlsx") === true
     && searchPrivate.isLowValueResult?.("PDF", "https://example.com/file.pdf") === true,
   "src/lib/search.js: non-HTML document URLs must be filtered before content extraction"
+);
+assertCondition(
+  searchPrivate.naverSearchTemplateFor?.({ searchChannel: "blog" }) === naverBlogSearchTemplate
+    && searchPrivate.naverSearchTemplateFor?.({ searchChannel: "web" }) === "https://search.naver.com/search.naver?where=web&query={query}",
+  "src/lib/search.js: category search channel must select Naver blog or web search URLs"
 );
 const foodSearchQuery = searchPrivate.buildQueryText?.(
   "생생정보통에 소개된 최신 맛집 중 독자가 실제 방문 전 확인해야 할 메뉴, 위치, 주변 볼거리 정보를 함께 정리하는 방향이 적합하다.",
@@ -274,6 +299,38 @@ const institutionalSummary = searchLib.summarizeSourceQuality?.([{
 assertCondition(
   institutionalSummary?.status === "usable" && institutionalSummary?.strongEvidenceCandidates === 1,
   "src/lib/search.js: strict source quality must accept reliable current institutional evidence"
+);
+const strictBlogOptions = {
+  searchNeed: "strict",
+  topic: "생생정보통 맛집 추천",
+  keyword: "생생정보통 맛집 추천",
+  researchGuidance: "공식 최신 출처와 현재 운영 정보 확인",
+  trustBlogAsSource: true
+};
+const strictBlogProfile = searchPrivate.buildSearchProfile?.(strictBlogOptions);
+const trustedBlogRelevance = searchPrivate.scoreCandidate?.({
+  title: "생생정보통 맛집 추천 방문 후기",
+  url: "https://blog.naver.com/sample/223000000000",
+  excerpt: "2026년 6월 20일 기준 메뉴, 위치, 영업시간, 예약, 주차 정보를 직접 방문 후 정리했습니다."
+}, ["생생정보통", "맛집", "추천"], strictBlogOptions, strictBlogProfile);
+assertCondition(
+  trustedBlogRelevance?.blogTrustedSource === true
+    && trustedBlogRelevance?.lowTrustSource === false
+    && searchPrivate.hasStrongEvidence?.({ relevance: trustedBlogRelevance }) === true,
+  "src/lib/search.js: trusted Naver blog categories must allow directly relevant current blog evidence"
+);
+const strictUntrustedBlogOptions = { ...strictBlogOptions, trustBlogAsSource: false };
+const strictUntrustedBlogProfile = searchPrivate.buildSearchProfile?.(strictUntrustedBlogOptions);
+const untrustedBlogRelevance = searchPrivate.scoreCandidate?.({
+  title: "생생정보통 맛집 추천 방문 후기",
+  url: "https://blog.naver.com/sample/223000000000",
+  excerpt: "2026년 6월 20일 기준 메뉴, 위치, 영업시간, 예약, 주차 정보를 직접 방문 후 정리했습니다."
+}, ["생생정보통", "맛집", "추천"], strictUntrustedBlogOptions, strictUntrustedBlogProfile);
+assertCondition(
+  untrustedBlogRelevance?.blogTrustedSource !== true
+    && untrustedBlogRelevance?.lowTrustSource === true
+    && searchPrivate.hasStrongEvidence?.({ relevance: untrustedBlogRelevance }) === false,
+  "src/lib/search.js: untrusted blog categories must keep Naver blog evidence out of strict strong evidence"
 );
 const irrelevantSummary = searchLib.summarizeSourceQuality?.([{
   title: "feedback",

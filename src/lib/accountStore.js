@@ -14,6 +14,10 @@ function makeId(prefix = "acct") {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function normalizeSearchChannel(value) {
+  return ["blog", "web"].includes(value) ? value : "blog";
+}
+
 function normalizeCategory(category) {
   if (typeof category === "string") {
     return {
@@ -24,6 +28,8 @@ function normalizeCategory(category) {
       publishPurpose: "",
       preferredTone: "",
       freshnessLevel: "auto",
+      searchChannel: "blog",
+      trustBlogAsSource: false,
       checked: true
     };
   }
@@ -37,6 +43,8 @@ function normalizeCategory(category) {
     freshnessLevel: ["auto", "low", "medium", "high"].includes(category?.freshnessLevel)
       ? category.freshnessLevel
       : "auto",
+    searchChannel: normalizeSearchChannel(category?.searchChannel),
+    trustBlogAsSource: category?.trustBlogAsSource === true,
     checked: category?.checked !== false
   };
 }

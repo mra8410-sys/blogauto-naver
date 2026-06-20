@@ -526,6 +526,8 @@ async function startJob(form) {
         publishPurpose: form.publishPurpose || "",
         preferredTone: form.preferredTone || "",
         freshnessLevel: form.freshnessLevel || "auto",
+        searchChannel: form.searchChannel || "blog",
+        trustBlogAsSource: form.trustBlogAsSource === true,
         agentModels,
         historyTitles: titleHistory.map((item) => item.title),
         accountImageStyle: {
@@ -615,7 +617,9 @@ async function startJob(form) {
             primaryProvider: form.primarySearchProvider || "naver",
             fallbackProvider: form.fallbackSearchProvider || "google",
             naverSearchUrl: form.naverSearchUrl,
-            googleSearchUrl: form.googleSearchUrl
+            googleSearchUrl: form.googleSearchUrl,
+            searchChannel: form.searchChannel || "blog",
+            trustBlogAsSource: form.trustBlogAsSource === true
           }, (message, level) => safeLog(jobId, message, level, "research"));
           const mergedSearchResults = mergeSearchResults(searchContext.previousSearchResults, searchResults);
           safeLog(jobId, `검색 후보 수집 완료: ${searchResults.length}개, 누적 ${mergedSearchResults.length}개`, "info", "research");

@@ -59,12 +59,14 @@ const STOP_WORDS = new Set([
   "http"
 ]);
 
-const CURRENT_FACT_PATTERN = /(모집|채용|접수|신청\s*기간|신청기간|지원\s*대상|지원대상|대상\s*연령|대상연령|신청\s*조건|신청조건|참여\s*대상|참여대상|사업\s*기간|사업기간|운영\s*기간|운영기간|마감|공고|자격|선발|교육\s*기간|교육기간)/i;
+const CURRENT_FACT_PATTERN = /(모집|채용|접수|신청\s*기간|신청기간|지원\s*대상|지원대상|대상\s*연령|대상연령|신청\s*조건|신청조건|참여\s*대상|참여대상|사업\s*기간|사업기간|운영\s*기간|운영기간|운영\s*시간|영업\s*시간|영업시간|휴무|정기\s*휴무|브레이크\s*타임|라스트\s*오더|예약|주차|가격|요금|입장료|메뉴|전화|주소|위치|판매\s*기간|행사\s*기간|공연\s*일정|업데이트|최신|현재|기준|마감|공고|자격|선발|교육\s*기간|교육기간)/i;
 const DATE_FACT_PATTERN = /(20\d{2}\s*년|\d{1,2}\s*월\s*\d{1,2}\s*일|\d{4}[./-]\d{1,2}[./-]\d{1,2}|today|yesterday|tomorrow|jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)/i;
 const LOW_TRUST_DOMAIN_PATTERN = /(blogspot\.com|tistory\.com|wordpress\.com|blog\.naver\.com|m\.blog\.naver\.com|cafe\.naver\.com|brunch\.co\.kr|post\.naver\.com)/i;
 const OFFICIAL_DOMAIN_PATTERN = /(^|\.)go\.kr$|(^|\.)gov(\.[a-z]{2,})?$|(^|\.)mil(\.[a-z]{2,})?$|(^|\.)edu(\.[a-z]{2,})?$|(^|\.)ac\.kr$/i;
 const INSTITUTIONAL_DOMAIN_PATTERN = /(^|\.)or\.kr$|(^|\.)org$|(^|\.)int$|(^|\.)re\.kr$/i;
 const UNSUPPORTED_CONTENT_URL_PATTERN = /\.(?:pdf|xls|xlsx|csv|doc|docx|ppt|pptx|hwp|hwpx|zip|7z|rar)(?:[?#].*)?$/i;
+const NAVER_BLOG_SEARCH_URL = "https://search.naver.com/search.naver?ssc=tab.blog.all&sm=tab_jum&query={query}";
+const NAVER_WEB_SEARCH_URL = "https://search.naver.com/search.naver?where=web&query={query}";
 
 function fetchText(url) {
   return new Promise((resolve, reject) => {
@@ -186,6 +188,11 @@ function isLowTrustDomain(url) {
   return LOW_TRUST_DOMAIN_PATTERN.test(hostFromUrl(url));
 }
 
+function isTrustedBlogSource(url, profile) {
+  if (profile?.trustBlogAsSource !== true) return false;
+  return /(^|\.)blog\.naver\.com$|(^|\.)m\.blog\.naver\.com$/i.test(hostFromUrl(url));
+}
+
 function splitKeywordPhrases(keyword) {
   return String(keyword || "")
     .split(/[,\n]+/)
@@ -234,7 +241,8 @@ function requiresStrictSourceEvidence(options) {
 function buildSearchProfile(options) {
   return {
     strictEvidence: requiresStrictSourceEvidence(options),
-    keywordPhrases: splitKeywordPhrases(options.keyword)
+    keywordPhrases: splitKeywordPhrases(options.keyword),
+    trustBlogAsSource: options.trustBlogAsSource === true
   };
 }
 
@@ -244,10 +252,12 @@ function candidateSignals(candidate, profile) {
   const phraseMatches = profile.keywordPhrases
     .filter((phrase) => lower.includes(phrase.toLowerCase()))
     .slice(0, 10);
+  const blogTrustedSource = profile.strictEvidence && isTrustedBlogSource(candidate.url, profile);
   return {
     officialSource: profile.strictEvidence && isOfficialDomain(candidate.url),
     institutionalSource: profile.strictEvidence && isInstitutionalDomain(candidate.url),
-    lowTrustSource: profile.strictEvidence && isLowTrustDomain(candidate.url),
+    blogTrustedSource,
+    lowTrustSource: profile.strictEvidence && isLowTrustDomain(candidate.url) && !blogTrustedSource,
     currentFactSignal: profile.strictEvidence && (CURRENT_FACT_PATTERN.test(text) || DATE_FACT_PATTERN.test(text)),
     phraseMatches
   };
@@ -406,6 +416,7 @@ function scoreCandidate(candidate, commonTokens, options, profile = buildSearchP
   }
   if (signals.officialSource) score += 5;
   if (signals.institutionalSource) score += 3;
+  if (signals.blogTrustedSource) score += 2;
   if (signals.currentFactSignal) score += 4;
   if (signals.lowTrustSource) score -= 4;
   if ((candidate.excerpt || "").length > 180) score += 2;
@@ -416,6 +427,7 @@ function scoreCandidate(candidate, commonTokens, options, profile = buildSearchP
     keywordMatchedTerms: keywordMatchedTerms.slice(0, 10),
     officialSource: signals.officialSource,
     institutionalSource: signals.institutionalSource,
+    blogTrustedSource: signals.blogTrustedSource,
     lowTrustSource: signals.lowTrustSource,
     currentFactSignal: signals.currentFactSignal,
     strictEvidence: profile.strictEvidence
@@ -484,6 +496,18 @@ async function fetchCandidateContent(candidate) {
   };
 }
 
+function normalizeSearchChannel(value) {
+  return ["blog", "web"].includes(String(value || "").toLowerCase())
+    ? String(value).toLowerCase()
+    : "blog";
+}
+
+function naverSearchTemplateFor(options = {}) {
+  return normalizeSearchChannel(options.searchChannel) === "web"
+    ? NAVER_WEB_SEARCH_URL
+    : NAVER_BLOG_SEARCH_URL;
+}
+
 function buildSearchUrl(provider, template, topic, keyword, topicMode, querySuffix = "") {
   const queryText = buildQueryText(topic, keyword, topicMode, querySuffix);
   const query = encodeURIComponent(queryText);
@@ -497,7 +521,7 @@ function buildSearchUrl(provider, template, topic, keyword, topicMode, querySuff
 }
 
 async function providerSearch(provider, options, querySuffix = "") {
-  const template = provider === "naver" ? options.naverSearchUrl : options.googleSearchUrl;
+  const template = provider === "naver" ? naverSearchTemplateFor(options) : options.googleSearchUrl;
   const url = buildSearchUrl(provider, template, options.topic, options.keyword, options.topicMode, querySuffix);
   const html = await fetchText(url);
   return parseLinks(html, provider);
@@ -509,6 +533,7 @@ function isStrongCandidate(item, profile) {
   const hasDirectKeyword = Array.isArray(relevance.keywordMatchedTerms) && relevance.keywordMatchedTerms.length > 0;
   const hasReliableSource = relevance.officialSource === true
     || relevance.institutionalSource === true
+    || relevance.blogTrustedSource === true
     || relevance.lowTrustSource !== true;
   return hasReliableSource
     && relevance.currentFactSignal === true
@@ -670,6 +695,7 @@ function hasStrongEvidence(item) {
   const hasDirectKeyword = Array.isArray(relevance.keywordMatchedTerms) && relevance.keywordMatchedTerms.length > 0;
   const hasReliableSource = relevance.officialSource === true
     || relevance.institutionalSource === true
+    || relevance.blogTrustedSource === true
     || relevance.lowTrustSource !== true;
   return relevance.strictEvidence === true
     && hasReliableSource
@@ -717,6 +743,7 @@ module.exports = {
   collectSearchResults,
   summarizeSourceQuality,
   _private: {
+    naverSearchTemplateFor,
     buildQueryText,
     buildSearchProfile,
     scoreCandidate,
