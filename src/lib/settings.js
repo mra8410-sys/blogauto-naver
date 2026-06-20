@@ -1,6 +1,9 @@
 const fs = require("node:fs");
 const path = require("node:path");
 
+const LEGACY_NAVER_SEARCH_URL = "https://search.naver.com/search.naver?where=web&query={query}";
+const DEFAULT_NAVER_SEARCH_URL = "https://search.naver.com/search.naver?ssc=tab.blog.all&sm=tab_jum&query={query}";
+
 const DEFAULT_SETTINGS = {
   naverId: "",
   blogId: "",
@@ -11,7 +14,7 @@ const DEFAULT_SETTINGS = {
   codexCmdPath: "codex.cmd",
   primarySearchProvider: "naver",
   fallbackSearchProvider: "google",
-  naverSearchUrl: "https://search.naver.com/search.naver?where=web&query={query}",
+  naverSearchUrl: DEFAULT_NAVER_SEARCH_URL,
   googleSearchUrl: "https://www.google.com/search?q={query}&num=20&hl=ko",
   naverEditorDomNotes: "",
   publishAfterGenerate: false,
@@ -46,19 +49,27 @@ function ensureSettingsFile(runtimeRoot) {
   }
 }
 
+function normalizeSettings(settings) {
+  const normalized = { ...settings };
+  if (!normalized.naverSearchUrl || normalized.naverSearchUrl === LEGACY_NAVER_SEARCH_URL) {
+    normalized.naverSearchUrl = DEFAULT_NAVER_SEARCH_URL;
+  }
+  return normalized;
+}
+
 function readSettings(runtimeRoot) {
   ensureSettingsFile(runtimeRoot);
   try {
     const raw = fs.readFileSync(getSettingsPath(runtimeRoot), "utf8").replace(/^\uFEFF/, "");
     const parsed = JSON.parse(raw);
-    return {
+    return normalizeSettings({
       ...DEFAULT_SETTINGS,
       ...parsed,
       agentModels: {
         ...DEFAULT_SETTINGS.agentModels,
         ...(parsed.agentModels || {})
       }
-    };
+    });
   } catch {
     return { ...DEFAULT_SETTINGS };
   }
@@ -77,6 +88,7 @@ function writeSettings(runtimeRoot, nextSettings) {
 
 module.exports = {
   DEFAULT_SETTINGS,
+  DEFAULT_NAVER_SEARCH_URL,
   ensureSettingsFile,
   readSettings,
   writeSettings,

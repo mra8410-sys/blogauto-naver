@@ -18,7 +18,7 @@ const state = {
 };
 
 const $ = (selector) => document.querySelector(selector);
-const DEFAULT_NAVER_SEARCH_URL = "https://search.naver.com/search.naver?where=web&query={query}";
+const DEFAULT_NAVER_SEARCH_URL = "https://search.naver.com/search.naver?ssc=tab.blog.all&sm=tab_jum&query={query}";
 const DEFAULT_GOOGLE_SEARCH_URL = "https://www.google.com/search?q={query}&num=20&hl=ko";
 const STARTUP_NOTICE_KEY = "blogauto.startupNotice.dismissed.v2";
 const DEFAULT_AGENT_MODELS = {

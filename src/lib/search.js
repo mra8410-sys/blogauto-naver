@@ -491,7 +491,7 @@ function buildSearchUrl(provider, template, topic, keyword, topicMode, querySuff
     return template.replace("{query}", query);
   }
   if (provider === "naver") {
-    return `https://search.naver.com/search.naver?where=web&query=${query}`;
+    return `https://search.naver.com/search.naver?ssc=tab.blog.all&sm=tab_jum&query=${query}`;
   }
   return `https://www.google.com/search?q=${query}&num=20&hl=ko`;
 }

@@ -169,6 +169,10 @@ const sourceFiles = {
   settings: {
     relative: "src/lib/settings.js",
     content: fs.readFileSync(path.join(root, "src", "lib", "settings.js"), "utf8")
+  },
+  search: {
+    relative: "src/lib/search.js",
+    content: fs.readFileSync(path.join(root, "src", "lib", "search.js"), "utf8")
   }
 };
 
@@ -181,6 +185,23 @@ function assertCondition(condition, description) {
     console.error(description);
   }
 }
+
+const naverBlogSearchTemplate = "https://search.naver.com/search.naver?ssc=tab.blog.all&sm=tab_jum&query={query}";
+const naverBlogSearchFallback = "https://search.naver.com/search.naver?ssc=tab.blog.all&sm=tab_jum&query=${query}";
+assertCondition(
+  sourceFiles.settings.content.includes(`DEFAULT_NAVER_SEARCH_URL = "${naverBlogSearchTemplate}"`)
+    && sourceFiles.settings.content.includes("LEGACY_NAVER_SEARCH_URL")
+    && sourceFiles.settings.content.includes("normalized.naverSearchUrl = DEFAULT_NAVER_SEARCH_URL"),
+  "src/lib/settings.js: Naver default search URL must use the blog tab and migrate the legacy web default"
+);
+assertCondition(
+  sourceFiles.rendererApp.content.includes(`DEFAULT_NAVER_SEARCH_URL = "${naverBlogSearchTemplate}"`),
+  "src/renderer/app.js: renderer default Naver search URL must use the blog tab"
+);
+assertCondition(
+  sourceFiles.search.content.includes(naverBlogSearchFallback),
+  "src/lib/search.js: Naver search fallback URL must use the blog tab"
+);
 
 assertCondition(
   typeof searchLib.summarizeSourceQuality === "function",
