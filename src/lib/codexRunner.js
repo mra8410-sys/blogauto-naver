@@ -1172,6 +1172,14 @@ function firstCompactText(values, fallback = "") {
   return compactTextList(values)[0] || fallback;
 }
 
+function codexTaskTimeoutMs(agent = "") {
+  const raw = Number(process.env.BLOGAUTO_CODEX_TASK_TIMEOUT_MS || 0);
+  if (Number.isFinite(raw) && raw >= 30000) return raw;
+  if (agent === "research") return 120000;
+  if (agent === "image" || agent === "imageStyle") return 300000;
+  return 180000;
+}
+
 function summarizeUsableSourcesForContract(sources, limit = 5) {
   if (!Array.isArray(sources)) return [];
   return sources.slice(0, limit)
@@ -1635,12 +1643,20 @@ async function runCodexTask({
     });
 
     let settled = false;
+    const timeoutMs = codexTaskTimeoutMs(agent);
+    const startedAt = Date.now();
     const settle = (error) => {
       if (settled) return;
       settled = true;
+      clearTimeout(timeout);
       if (error) reject(error);
       else resolve();
     };
+    const timeout = setTimeout(() => {
+      const elapsedSeconds = Math.round((Date.now() - startedAt) / 1000);
+      child.kill();
+      settle(new Error(`${agentDisplayName(agent)}가 ${elapsedSeconds}초 동안 결과 파일을 만들지 않아 중단했습니다. 다시 시도하거나 모델 effort를 낮춰주세요.`));
+    }, timeoutMs);
 
     const streamBuffers = { info: "", warn: "" };
     const processOutputLine = (line, level = "info") => {
