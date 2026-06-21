@@ -57,6 +57,9 @@ function normalizeSettings(settings) {
   if (!normalized.naverSearchUrl || normalized.naverSearchUrl === LEGACY_NAVER_SEARCH_URL) {
     normalized.naverSearchUrl = DEFAULT_NAVER_SEARCH_URL;
   }
+  if (String(normalized.codexCmdPath || "").trim().toLowerCase() === "codex.cmd") {
+    normalized.codexCmdPath = DEFAULT_SETTINGS.codexCmdPath;
+  }
   normalized.imageAspectRatio = normalizeImageAspectRatio(normalized.imageAspectRatio);
   return normalized;
 }

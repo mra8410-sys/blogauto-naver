@@ -402,8 +402,11 @@ async function dismissStartupNotice() {
     // Ignore storage failures; the notice can still be dismissed for this session.
   }
   if (state.chrome.available === false) {
-    window.alert("Chrome이 설치되어 있지 않아 네이버 세션 확인과 블로그 발행을 진행할 수 없습니다. Chrome 설치 페이지를 연 뒤 프로그램을 종료합니다.");
-    await window.blogAuto.openChromeInstallAndQuit();
+    addLog({
+      level: "warn",
+      message: "Chrome is not installed in a standard path. Article generation can continue, but Naver session checks and publishing require Chrome.",
+      at: new Date().toISOString()
+    });
   }
 }
 
