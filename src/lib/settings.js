@@ -60,6 +60,8 @@ function normalizeSettings(settings) {
   if (String(normalized.codexCmdPath || "").trim().toLowerCase() === "codex.cmd") {
     normalized.codexCmdPath = DEFAULT_SETTINGS.codexCmdPath;
   }
+  normalized.repeatTermMinutes = Math.max(1, Number(normalized.repeatTermMinutes || DEFAULT_SETTINGS.repeatTermMinutes));
+  normalized.reserveAfterHours = Math.max(1, Number(normalized.reserveAfterHours || DEFAULT_SETTINGS.reserveAfterHours));
   normalized.imageAspectRatio = normalizeImageAspectRatio(normalized.imageAspectRatio);
   return normalized;
 }

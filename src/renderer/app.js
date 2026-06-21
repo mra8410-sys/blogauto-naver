@@ -390,7 +390,7 @@ function showStartupNoticeIfNeeded() {
   } catch {
     dismissed = false;
   }
-  notice.hidden = dismissed && state.chrome.available !== false;
+  notice.hidden = dismissed;
 }
 
 async function dismissStartupNotice() {

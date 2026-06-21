@@ -39,6 +39,7 @@
     "playwright-core": "^1.45.0"
   },
   "devDependencies": {
+    "@openai/codex": "^0.141.0",
     "electron": "^31.0.0",
     "electron-builder": "^24.13.3"
   }

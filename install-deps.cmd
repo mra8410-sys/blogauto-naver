@@ -8,7 +8,7 @@ set "PNPM_CLI=C:\Users\owner\.cache\codex-runtimes\codex-primary-runtime\depende
 if not exist "%NODE_EXE%" set "NODE_EXE=node"
 
 cd /d "%APP_DIR%"
+set "PATH=%APP_DIR%node_modules\.bin;C:\Users\owner\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin;%PATH%"
 "%NODE_EXE%" "%PNPM_CLI%" install --no-lockfile
 "%NODE_EXE%" "%PNPM_CLI%" approve-builds --all
 "%NODE_EXE%" "%PNPM_CLI%" rebuild electron
-

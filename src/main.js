@@ -70,6 +70,16 @@ function getRuntimeRoot() {
   return path.join(app.getAppPath(), "runtime");
 }
 
+function resolveCodexCmdPath(candidate = "") {
+  const requested = String(candidate || "").trim();
+  const normalized = requested.toLowerCase();
+  if (!requested || normalized === "codex" || normalized === "codex.cmd") {
+    const localCodex = path.join(app.getAppPath(), "node_modules", ".bin", process.platform === "win32" ? "codex.CMD" : "codex");
+    if (fs.existsSync(localCodex)) return localCodex;
+  }
+  return requested || "codex";
+}
+
 function emit(channel, payload) {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send(channel, payload);
@@ -456,7 +466,7 @@ async function startJob(form) {
   const naverId = String(form.naverId || account.naverId || "").trim();
   const blogId = String(form.blogId || account.blogId || naverId).trim();
   const naverPassword = String(form.naverPassword || account.naverPassword || "");
-  const codexCmdPath = String(form.codexCmdPath || "codex").trim();
+  const codexCmdPath = resolveCodexCmdPath(form.codexCmdPath || "codex");
   const publishVisibility = String(form.publishVisibility || (form.publishPrivate === false ? "public" : "private"));
   const publishPrivate = publishVisibility !== "public";
   const publishScheduleMode = String(form.publishScheduleMode || "now");
@@ -993,7 +1003,7 @@ app.whenReady().then(() => {
     const settings = readSettings(runtimeRoot);
     return {
       runtimeRoot,
-      codexCmdPath: "codex",
+      codexCmdPath: resolveCodexCmdPath(settings.codexCmdPath || "codex"),
       chrome: detectChromeInstall(),
       settings,
       accountStore: withAccountImageUrls(runtimeRoot, readAccountStore(runtimeRoot, settings)),
@@ -1028,7 +1038,7 @@ app.whenReady().then(() => {
     let snapshot;
     try {
       snapshot = await fetchCodexUsageSnapshot({
-        codexCmdPath: String(settings.codexCmdPath || "codex").trim(),
+        codexCmdPath: resolveCodexCmdPath(settings.codexCmdPath || "codex"),
         cwd: runtimeRoot
       });
     } catch (error) {
