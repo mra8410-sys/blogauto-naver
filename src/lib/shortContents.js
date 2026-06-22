@@ -1,3 +1,5 @@
+const https = require("node:https");
+
 const SHORT_CONTENT_CATEGORIES = [
   "전체",
   "엔터 종합",
@@ -30,101 +32,122 @@ const SHORT_CONTENT_CATEGORIES = [
   "생활경제"
 ];
 
-const CATEGORY_TITLE_SEEDS = {
-  "증권": [
-    "SK하이닉스 주가 110~270만원 전망",
-    "코스피 9070선 회복, 개미 1조 매수",
-    "원화 환율 1530.9원 개장 상승",
-    "LG전자 엔비디아 협력 기대감",
-    "국제유가 30% 하락, 국내 기름값 2000원대",
-    "코스닥 소부장 반도체 20위권 진입",
-    "삼성전자 외국인 매수세 재개",
-    "2차전지주 반등, 수급 개선 기대",
-    "미국 금리 인하 전망에 성장주 강세",
-    "조선주 수주 기대감에 동반 상승"
-  ],
-  "스포츠 종합": [
-    "주말 프로야구 순위 경쟁 본격화",
-    "축구 대표팀 새 전술 실험 관심",
-    "프로농구 FA 시장 주요 선수 이동",
-    "배구 리그 외국인 선수 교체 변수",
-    "손흥민 다음 시즌 거취 관심 집중",
-    "국내 골프 신예 선수 우승 경쟁",
-    "올림픽 종목 대표 선발전 열기",
-    "프로야구 신인 투수 돌풍",
-    "K리그 여름 이적시장 전망",
-    "스포츠 스타 브랜드 협업 확대"
-  ],
-  "경제 종합": [
-    "물가 안정 흐름 속 금리 전망 주목",
-    "자영업 경기 체감지수 회복 기대",
-    "환율 변동에 수입 물가 부담 확대",
-    "부동산 대출 규제 변화 관심",
-    "전기요금 인상 가능성 다시 부각",
-    "청년 지원 정책 신청 일정 확인",
-    "소비 쿠폰 효과 지역상권 기대",
-    "반도체 수출 회복세 경제 지표 개선",
-    "유가 하락이 물가에 미치는 영향",
-    "하반기 경제정책 방향 핵심 정리"
-  ],
-  "방송": [
-    "새 예능 프로그램 첫 방송 반응",
-    "드라마 시청률 경쟁 구도 변화",
-    "OTT 오리지널 콘텐츠 흥행 전망",
-    "방송가 파일럿 프로그램 편성 확대",
-    "인기 MC 새 프로그램 합류 소식",
-    "주말 예능 화제성 순위 변화",
-    "리얼리티 예능 출연진 관심 집중",
-    "드라마 결말 해석과 시즌2 가능성",
-    "음악 방송 컴백 무대 반응",
-    "방송 플랫폼별 시청 패턴 변화"
-  ],
-  "자동차": [
-    "전기차 보조금 개편 영향",
-    "하이브리드 SUV 판매 증가",
-    "중고차 시세 변동 체크포인트",
-    "신형 세단 출시 일정 관심",
-    "자율주행 기술 경쟁 본격화",
-    "수입차 할인 프로모션 확대",
-    "패밀리카 추천 기준 변화",
-    "전기차 충전 인프라 개선 전망",
-    "국산 픽업트럭 시장 관심",
-    "자동차 보험료 절약 방법"
-  ]
+const CATEGORY_QUERY_MAP = {
+  "전체": "오늘 주요 뉴스",
+  "엔터 종합": "연예 방송 뉴스",
+  "여행맛집 종합": "여행 맛집 뉴스",
+  "패션뷰티 종합": "패션 뷰티 트렌드",
+  "리빙푸드 종합": "리빙 푸드 뉴스",
+  "스포츠 종합": "스포츠 뉴스",
+  "국내여행": "국내여행 뉴스",
+  "카테크 종합": "자동차 테크 뉴스",
+  "맛집/카페": "맛집 카페 뉴스",
+  "세계여행": "세계여행 뉴스",
+  "패션트렌드": "패션 트렌드 뉴스",
+  "경제 종합": "경제 뉴스",
+  "지식 종합": "생활 지식 뉴스",
+  "생활경제": "생활경제 뉴스"
 };
 
-function normalizeCategoryName(categoryName) {
-  return String(categoryName || "").trim();
+function requestText(url) {
+  return new Promise((resolve, reject) => {
+    const request = https.get(url, {
+      headers: {
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "accept-language": "ko-KR,ko;q=0.9,en-US;q=0.7,en;q=0.6",
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36"
+      },
+      timeout: 12000
+    }, (response) => {
+      let body = "";
+      response.setEncoding("utf8");
+      response.on("data", (chunk) => {
+        body += chunk;
+      });
+      response.on("end", () => {
+        if (response.statusCode < 200 || response.statusCode >= 300) {
+          reject(new Error(`Naver request failed with status ${response.statusCode}`));
+          return;
+        }
+        resolve(body);
+      });
+    });
+    request.on("timeout", () => {
+      request.destroy(new Error("Naver request timed out"));
+    });
+    request.on("error", reject);
+  });
 }
 
-function fallbackSeedsForCategory(categoryName) {
-  const category = normalizeCategoryName(categoryName) || "전체";
+function decodeHtml(value) {
+  return String(value || "")
+    .replace(/<mark>/gi, "")
+    .replace(/<\/mark>/gi, "")
+    .replace(/&quot;/g, "\"")
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&nbsp;/g, " ");
+}
+
+function cleanTitle(value) {
+  return decodeHtml(value)
+    .replace(/<[^>]*>/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function categoryQuery(categoryName) {
+  const category = String(categoryName || "").trim();
+  return CATEGORY_QUERY_MAP[category] || `${category.replace(/\s*종합\s*$/u, "").trim()} 뉴스`;
+}
+
+function categoryQueryVariants(categoryName) {
+  const category = String(categoryName || "").trim();
+  const base = category.replace(/\s*종합\s*$/u, "").trim();
+  const seen = new Set();
   return [
-    `${category} 인기 이슈 핵심 정리`,
-    `${category} 오늘 많이 본 콘텐츠 흐름`,
-    `${category} 최신 키워드 변화 분석`,
-    `${category} 관심이 높아진 이유`,
-    `${category} 관련 소식 한눈에 보기`,
-    `${category} 지금 확인할 만한 포인트`,
-    `${category} 사람들이 주목하는 주제`,
-    `${category} 이번 주 화제 키워드`,
-    `${category} 새롭게 떠오른 이야기`,
-    `${category} 주요 변화와 체크포인트`
-  ];
+    categoryQuery(category),
+    `${base} 주요 뉴스`,
+    `${base} 인기 뉴스`,
+    `${base} 이슈`
+  ]
+    .map((query) => query.replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .filter((query) => {
+      const key = query.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 4);
 }
 
-function expandToTwentyTitles(categoryName, seeds) {
-  const base = seeds.length ? seeds : fallbackSeedsForCategory(categoryName);
-  const result = [];
-  let round = 0;
-  while (result.length < 20) {
-    for (const title of base) {
-      if (result.length >= 20) break;
-      result.push(round === 0 ? title : `${title} ${round + 1}`);
-    }
-    round += 1;
-  }
-  return result;
+function uniqueTitles(titles) {
+  const seen = new Set();
+  return titles
+    .map(cleanTitle)
+    .filter((title) => title.length >= 8 && title.length <= 90)
+    .filter((title) => !/^(검색옵션|옵션|Keep|관련문서|뉴스검색|직접입력)/.test(title))
+    .filter((title) => {
+      const key = title.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
+function extractNewsTitles(html) {
+  const titleSpans = [...String(html || "").matchAll(
+    /<span[^>]*class="[^"]*sds-comps-text-type-headline1[^"]*"[^>]*>([\s\S]*?)<\/span>/g
+  )].map((match) => match[1]);
+
+  const linkTitles = [...String(html || "").matchAll(
+    /<a[^>]*data-heatmap-target="\.tit"[^>]*>([\s\S]*?)<\/a>/g
+  )].map((match) => match[1]);
+
+  return uniqueTitles([...titleSpans, ...linkTitles]).slice(0, 20);
 }
 
 function listShortContentCategories() {
@@ -137,13 +160,26 @@ function listShortContentCategories() {
   };
 }
 
-function listShortContentTitles(categoryName) {
-  const category = normalizeCategoryName(categoryName);
-  const seeds = CATEGORY_TITLE_SEEDS[category] || [];
+async function listShortContentTitles(categoryName) {
+  const category = String(categoryName || "").trim();
+  const query = categoryQuery(category);
+  const titles = [];
+  for (const queryVariant of categoryQueryVariants(category)) {
+    if (titles.length >= 20) break;
+    for (const start of [1, 11, 21]) {
+      if (titles.length >= 20) break;
+      const url = `https://search.naver.com/search.naver?where=news&query=${encodeURIComponent(queryVariant)}&start=${start}`;
+      const html = await requestText(url);
+      titles.push(...extractNewsTitles(html));
+      titles.splice(0, titles.length, ...uniqueTitles(titles).slice(0, 20));
+    }
+  }
+  const unique = uniqueTitles(titles).slice(0, 20);
   return {
-    source: seeds.length ? "reference-shortcontents-category" : "fallback-shortcontents-category",
+    source: "naver-news-search",
     category,
-    titles: expandToTwentyTitles(category, seeds).map((title, index) => ({
+    query,
+    titles: unique.map((title, index) => ({
       id: `short_title_${index + 1}`,
       title
     }))
@@ -152,6 +188,8 @@ function listShortContentTitles(categoryName) {
 
 module.exports = {
   SHORT_CONTENT_CATEGORIES,
+  categoryQuery,
+  extractNewsTitles,
   listShortContentCategories,
   listShortContentTitles
 };
