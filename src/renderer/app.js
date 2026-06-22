@@ -15,7 +15,9 @@ const state = {
   accountManagerOpen: false,
   categoryManagerOpen: false,
   editingCategoryId: "",
-  shortContentCategories: []
+  shortContentCategories: [],
+  selectedShortContentCategory: "",
+  shortContentTitles: []
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -809,8 +811,30 @@ function renderShortContentCategories(categories = []) {
     return;
   }
   container.innerHTML = categories
-    .map((category) => `<button class="shortcontents-chip" type="button" data-category="${escapeHtml(category.name)}">${escapeHtml(category.name)}</button>`)
+    .map((category) => {
+      const selected = category.name === state.selectedShortContentCategory ? " selected" : "";
+      return `<button class="shortcontents-chip${selected}" type="button" data-category="${escapeHtml(category.name)}">${escapeHtml(category.name)}</button>`;
+    })
     .join("");
+}
+
+function renderShortContentTitles(titles = [], categoryName = "") {
+  const container = $("#shortContentsTitleList");
+  if (!container) return;
+  container.hidden = false;
+  const title = categoryName ? `<strong>${escapeHtml(categoryName)} 제목 20개</strong>` : "<strong>제목 20개</strong>";
+  if (!titles.length) {
+    container.innerHTML = `${title}<span class="hint">표시할 제목이 없습니다.</span>`;
+    return;
+  }
+  container.innerHTML = [
+    title,
+    "<div class=\"shortcontents-title-items\">",
+    ...titles.map((item, index) => (
+      `<button class="shortcontents-title-item" type="button" data-title="${escapeHtml(item.title)}"><span>${index + 1}</span>${escapeHtml(item.title)}</button>`
+    )),
+    "</div>"
+  ].join("");
 }
 
 async function loadShortContentCategories() {
@@ -830,6 +854,21 @@ async function loadShortContentCategories() {
   } finally {
     if (button) button.disabled = false;
   }
+}
+
+async function loadShortContentTitles(categoryName) {
+  const category = String(categoryName || "").trim();
+  if (!category) return;
+  state.selectedShortContentCategory = category;
+  renderShortContentCategories(state.shortContentCategories);
+  const result = await window.blogAuto.loadShortContentTitles(category);
+  state.shortContentTitles = Array.isArray(result?.titles) ? result.titles : [];
+  renderShortContentTitles(state.shortContentTitles, category);
+  addLog({
+    level: "info",
+    message: `숏텐츠 ${category} 제목 ${state.shortContentTitles.length}개를 불러왔습니다.`,
+    at: new Date().toISOString()
+  });
 }
 
 function collectForm(target = {}) {
@@ -1311,6 +1350,13 @@ async function boot() {
   });
 
   $("#loadShortContentsButton")?.addEventListener("click", loadShortContentCategories);
+  $("#shortContentsCategoryList")?.addEventListener("click", (event) => {
+    const button = event.target.closest(".shortcontents-chip");
+    if (!button) return;
+    loadShortContentTitles(button.dataset.category).catch((error) => {
+      addLog({ level: "error", message: `숏텐츠 제목 로드 실패: ${error.message}`, at: new Date().toISOString() });
+    });
+  });
 
   $("#addAccountButton").addEventListener("click", async () => {
     const naverId = $("#naverId").value.trim();

@@ -10,7 +10,7 @@ const { runCodexGeneration, fetchCodexUsageSnapshot } = require("./lib/codexRunn
 const { normalizeAgentResult, getPreviewImages } = require("./lib/imageAssets");
 const { publishToNaver, checkNaverSession } = require("./lib/naverPublisher");
 const { ensureSettingsFile, normalizeImageAspectRatio, readSettings, writeSettings } = require("./lib/settings");
-const { listShortContentCategories } = require("./lib/shortContents");
+const { listShortContentCategories, listShortContentTitles } = require("./lib/shortContents");
 const {
   ensureAccountStoreFile,
   readAccountStore,
@@ -1023,6 +1023,7 @@ app.whenReady().then(() => {
     return writeSettings(runtimeRoot, settings);
   });
   ipcMain.handle("shortcontents:categories", () => listShortContentCategories());
+  ipcMain.handle("shortcontents:titles", (_event, categoryName) => listShortContentTitles(categoryName));
   ipcMain.handle("codex:refreshUsage", async () => {
     const runtimeRoot = getRuntimeRoot();
     const settings = readSettings(runtimeRoot);
