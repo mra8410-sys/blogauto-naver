@@ -255,6 +255,50 @@ h2 {
   color: var(--primary-dark);
 }
 
+.shortcontents-title-item.selected {
+  border-color: var(--primary);
+  background: #e7fff1;
+  color: var(--primary-dark);
+  font-weight: 700;
+}
+
+.writing-options-grid {
+  border-top: 1px solid var(--border);
+  margin-top: 10px;
+  padding-top: 10px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.prompt-file-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 8px;
+}
+
+.prompt-file-row div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.prompt-file-row strong,
+.prompt-file-row span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.legacy-overlap-control {
+  display: none !important;
+}
+
 .header-actions,
 .panel-head,
 .inline-row,
@@ -1009,6 +1053,11 @@ tr:last-child td {
     grid-template-columns: 1fr;
     grid-template-areas: none;
     overflow: auto;
+  }
+
+  .writing-options-grid,
+  .prompt-file-row {
+    grid-template-columns: 1fr;
   }
 
   .agent-model-toolbar {

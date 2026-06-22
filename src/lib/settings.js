@@ -20,16 +20,20 @@ const DEFAULT_SETTINGS = {
   googleSearchUrl: "https://www.google.com/search?q={query}&num=20&hl=ko",
   naverEditorDomNotes: "",
   publishAfterGenerate: false,
-  publishPrivate: true,
+  publishPrivate: false,
   topicMode: "manual",
   repeatTermMinutes: 60,
-  publishVisibility: "private",
+  publishVisibility: "public",
   publishScheduleMode: "now",
   reserveAfterHours: 3,
   includeTitleImage: true,
   imageAspectRatio: DEFAULT_IMAGE_ASPECT_RATIO,
   maxBodyImages: 2,
   breakSentencesInBody: true,
+  writingTone: "",
+  articleLength: 1500,
+  articlePromptFilePath: "",
+  imagePromptFilePath: "",
   agentModels: {
     main: "high",
     research: "high",
@@ -62,6 +66,9 @@ function normalizeSettings(settings) {
   }
   normalized.repeatTermMinutes = Math.max(1, Number(normalized.repeatTermMinutes || DEFAULT_SETTINGS.repeatTermMinutes));
   normalized.reserveAfterHours = Math.max(1, Number(normalized.reserveAfterHours || DEFAULT_SETTINGS.reserveAfterHours));
+  normalized.articleLength = [1200, 1500, 2000].includes(Number(normalized.articleLength))
+    ? Number(normalized.articleLength)
+    : DEFAULT_SETTINGS.articleLength;
   normalized.imageAspectRatio = normalizeImageAspectRatio(normalized.imageAspectRatio);
   return normalized;
 }

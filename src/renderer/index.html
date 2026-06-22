@@ -89,14 +89,6 @@
             <h2>작업 입력</h2>
             <span id="settingsState" class="hint">설정 파일 자동 저장</span>
           </div>
-          <section class="shortcontents-panel" aria-label="숏텐츠 카테고리">
-            <div class="shortcontents-head">
-              <strong>숏텐츠</strong>
-              <button id="loadShortContentsButton" class="ghost small" type="button">카테고리 보기</button>
-            </div>
-            <div id="shortContentsCategoryList" class="shortcontents-list" hidden></div>
-            <div id="shortContentsTitleList" class="shortcontents-title-list" hidden></div>
-          </section>
           <form id="jobForm" class="form-grid" novalidate>
             <div class="manager-block wide">
               <div class="manager-head">
@@ -143,33 +135,83 @@
               <div id="accountList" class="account-list"></div>
             </div>
 
+            <section class="shortcontents-panel wide" aria-label="숏텐츠 카테고리">
+              <div class="shortcontents-head">
+                <strong>숏텐츠</strong>
+                <button id="loadShortContentsButton" class="ghost small" type="button">카테고리 보기</button>
+              </div>
+              <div id="shortContentsCategoryList" class="shortcontents-list" hidden></div>
+              <div id="shortContentsTitleList" class="shortcontents-title-list" hidden></div>
+              <div class="writing-options-grid">
+                <label class="wide">
+                  <span>작성 톤</span>
+                  <input id="writingTone" placeholder="예: 친근하지만 전문적으로, 초보자도 이해하기 쉽게" />
+                </label>
+                <label>
+                  <span>글 길이(공백 포함)</span>
+                  <select id="articleLength">
+                    <option value="1200">1,200자</option>
+                    <option value="1500" selected>1,500자</option>
+                    <option value="2000">2,000자</option>
+                  </select>
+                </label>
+                <label>
+                  <span>글 발행 방식</span>
+                  <select id="topicMode">
+                    <option value="manual">수동</option>
+                    <option value="auto">자동</option>
+                  </select>
+                </label>
+                <label class="compact-check wide">
+                  <input id="breakSentencesInBody" type="checkbox" checked />
+                  본문 내 문장 줄바꿈
+                </label>
+                <div class="prompt-file-row wide">
+                  <div>
+                    <strong>글 작성 프롬프트 파일</strong>
+                    <span id="articlePromptFileName" class="hint">선택된 파일 없음</span>
+                  </div>
+                  <button id="chooseArticlePromptFileButton" class="ghost small" type="button">파일 선택</button>
+                  <button id="clearArticlePromptFileButton" class="ghost small" type="button">해제</button>
+                </div>
+                <div class="prompt-file-row wide">
+                  <div>
+                    <strong>이미지 프롬프트 파일</strong>
+                    <span id="imagePromptFileName" class="hint">선택된 파일 없음</span>
+                  </div>
+                  <button id="chooseImagePromptFileButton" class="ghost small" type="button">파일 선택</button>
+                  <button id="clearImagePromptFileButton" class="ghost small" type="button">해제</button>
+                </div>
+              </div>
+            </section>
+
             <div class="manager-block wide">
               <div class="manager-head">
                 <strong>카테고리 관리</strong>
                 <button id="toggleCategoryManagerButton" class="ghost small" type="button">카테고리 관리</button>
               </div>
               <div id="categoryManager" class="category-manager">
-                <label>
-                  <span>카테고리 명</span>
-                  <input id="categoryName" placeholder="선택 계정에 추가할 카테고리" />
+                <label class="wide">
+                  <span>블로그 카테고리</span>
+                  <input id="categoryName" placeholder="네이버 블로그에 발행할 카테고리명" />
                 </label>
-                <label>
+                <label class="legacy-overlap-control">
                   <span>검색 키워드</span>
                   <input id="categoryKeyword" placeholder="자동 발행 시 이 키워드로 최신 이슈 검색" />
                 </label>
-                <label class="wide">
+                <label class="wide legacy-overlap-control">
                   <span>제외할 주제</span>
                   <input id="categoryExcludedTopics" placeholder="선택 입력, 쉼표로 구분" />
                 </label>
-                <label class="wide">
+                <label class="wide legacy-overlap-control">
                   <span>발행 목적</span>
                   <textarea id="categoryPublishPurpose" class="category-purpose-input" rows="5" placeholder="비우면 자동 판단"></textarea>
                 </label>
-                <label>
+                <label class="legacy-overlap-control">
                   <span>선호 톤</span>
                   <input id="categoryPreferredTone" placeholder="비우면 자동 판단" />
                 </label>
-                <label class="wide">
+                <label class="wide legacy-overlap-control">
                   <span>검색 최신성 수준</span>
                   <select id="categoryFreshnessLevel">
                     <option value="auto">자동 판단</option>
@@ -178,14 +220,14 @@
                     <option value="high">높음</option>
                   </select>
                 </label>
-                <label>
+                <label class="legacy-overlap-control">
                   <span>네이버 검색 탭</span>
                   <select id="categorySearchChannel">
                     <option value="blog">블로그</option>
                     <option value="web">웹</option>
                   </select>
                 </label>
-                <label class="compact-check">
+                <label class="compact-check legacy-overlap-control">
                   <input id="categoryTrustBlogAsSource" type="checkbox" />
                   블로그를 신뢰 근거로 인정
                 </label>
@@ -194,31 +236,18 @@
               <div id="categoryList" class="category-list"></div>
             </div>
 
-            <div class="topic-mode-row wide">
-              <label>
-                <span>글 발행 방식</span>
-                <select id="topicMode">
-                  <option value="manual">수동</option>
-                  <option value="auto">자동</option>
-                </select>
-              </label>
-              <label class="compact-check body-break-option">
-                <input id="breakSentencesInBody" type="checkbox" checked />
-                본문 내 문장 줄바꿈
-              </label>
-            </div>
             <label id="repeatTermLabel">
               <span>반복주기 Term (분)</span>
               <input id="repeatTermMinutes" type="number" min="1" step="1" value="60" />
             </label>
-            <label id="manualTopicLabel" class="wide">
+            <label id="manualTopicLabel" class="wide legacy-overlap-control">
               <span>주제</span>
               <input id="topic" name="topic" />
             </label>
-            <div class="check-row wide">
+            <div class="check-row wide legacy-overlap-control">
               <label><input id="publishAfterGenerate" type="checkbox" /> 생성 후 Naver 발행까지 진행</label>
             </div>
-            <div class="inline-row wide">
+            <div id="publishOptionsRow" class="inline-row wide">
               <label>
                 <span>공개설정</span>
                 <select id="publishVisibility">

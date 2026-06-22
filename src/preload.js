@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld("blogAuto", {
   refreshCodexUsage: () => ipcRenderer.invoke("codex:refreshUsage"),
   loadShortContentCategories: () => ipcRenderer.invoke("shortcontents:categories"),
   loadShortContentTitles: (categoryName) => ipcRenderer.invoke("shortcontents:titles", categoryName),
+  choosePromptFile: (title) => ipcRenderer.invoke("prompt:chooseFile", title),
   saveSettings: (settings) => ipcRenderer.invoke("settings:save", settings),
   saveAccountStore: (store) => ipcRenderer.invoke("accounts:save", store),
   chooseAccountSampleImage: (accountId) => ipcRenderer.invoke("accounts:chooseSampleImage", accountId),

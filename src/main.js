@@ -648,6 +648,10 @@ async function startJob(form) {
         excludedTopics: form.excludedTopics || "",
         publishPurpose: form.publishPurpose || "",
         preferredTone: form.preferredTone || "",
+        writingTone: form.writingTone || form.preferredTone || "",
+        articleLength: form.articleLength || 1500,
+        articlePromptFilePath: form.articlePromptFilePath || "",
+        imagePromptFilePath: form.imagePromptFilePath || "",
         freshnessLevel: form.freshnessLevel || "auto",
         searchChannel: form.searchChannel || "blog",
         trustBlogAsSource: form.trustBlogAsSource === true,
@@ -1021,6 +1025,18 @@ app.whenReady().then(() => {
   ipcMain.handle("settings:save", (_event, settings) => {
     const runtimeRoot = getRuntimeRoot();
     return writeSettings(runtimeRoot, settings);
+  });
+  ipcMain.handle("prompt:chooseFile", async (_event, title = "프롬프트 파일 선택") => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: String(title || "프롬프트 파일 선택"),
+      properties: ["openFile"],
+      filters: [
+        { name: "Prompt files", extensions: ["txt", "md"] },
+        { name: "All files", extensions: ["*"] }
+      ]
+    });
+    if (result.canceled || !result.filePaths?.length) return "";
+    return result.filePaths[0];
   });
   ipcMain.handle("shortcontents:categories", () => listShortContentCategories());
   ipcMain.handle("shortcontents:titles", (_event, categoryName) => listShortContentTitles(categoryName));

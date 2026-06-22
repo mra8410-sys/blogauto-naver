@@ -587,6 +587,17 @@ function isMissingCodexResultFileError(error) {
   return /Codex result file was not created:/i.test(String(error?.message || ""));
 }
 
+function readOptionalPromptFile(filePath = "") {
+  const target = String(filePath || "").trim();
+  if (!target) return "";
+  try {
+    if (!fs.existsSync(target) || !fs.statSync(target).isFile()) return "";
+    return fs.readFileSync(target, "utf8").replace(/^\uFEFF/, "").trim();
+  } catch {
+    return "";
+  }
+}
+
 function buildPrompt({
   topic,
   keyword,
@@ -604,6 +615,9 @@ function buildPrompt({
   excludedTopics = "",
   publishPurpose = "",
   preferredTone = "",
+  articleLength = 1500,
+  articlePromptFilePath = "",
+  imagePromptFilePath = "",
   freshnessLevel = "auto",
   writerRevisionFeedback = "",
   writerAttempt = 1,
@@ -613,7 +627,10 @@ function buildPrompt({
   const resultPath = path.join(jobDir, "agent-result.json");
   const imageDir = path.join(runtimeRoot || path.dirname(path.dirname(jobDir)), "image");
   const bodyImageLimit = Math.min(10, Math.max(0, Number.isFinite(Number(maxBodyImages)) ? Number(maxBodyImages) : 2));
+  const targetArticleLength = [1200, 1500, 2000].includes(Number(articleLength)) ? Number(articleLength) : 1500;
   const usesImages = includeTitleImage !== false || bodyImageLimit > 0;
+  const articlePromptText = readOptionalPromptFile(articlePromptFilePath);
+  const imagePromptText = readOptionalPromptFile(imagePromptFilePath);
   const researchSearchNeed = String(researchTitleResult?.searchNeed || "").toLowerCase();
   const writerContract = buildWriterContract(researchTitleResult, {
     topic,
@@ -636,7 +653,12 @@ function buildPrompt({
     `Category excluded topics: ${excludedTopics || "(agent decides)"}`,
     `Category publishing direction: ${publishPurpose || "(agent decides)"}`,
     `Preferred tone: ${preferredTone || "(agent decides)"}`,
+    `Target article length including spaces: about ${targetArticleLength} Korean characters`,
     "- Tone priority: explicit Preferred tone > Writer Contract tone > default human Naver Blog voice. If Preferred tone conflicts with default style rules, follow Preferred tone while preserving factual accuracy, safety, and title/body promise.",
+    articlePromptText ? "User selected article prompt file instructions:" : "",
+    articlePromptText ? articlePromptText : "",
+    imagePromptText ? "User selected image prompt file instructions:" : "",
+    imagePromptText ? imagePromptText : "",
     `Freshness level: ${freshnessLevel || "auto"}`,
     researchTitleResult ? `Research/Title selected title: ${researchTitleResult.finalTitle || researchTitleResult.selectedTitle || ""}` : "",
     `Current writing date: ${currentDateLabel || new Date().toISOString().slice(0, 10)}`,
@@ -711,7 +733,7 @@ function buildPrompt({
     "- In a failure case, do not generate images and do not write article sections explaining why writing is difficult.",
     "- Only set status to \"success\" when the remaining extracted excerpts support a real article.",
     "- If status is \"failed\", the desktop app will record failure history and stop the cycle. That is the correct behavior.",
-    "- Article must be Korean, Naver Blog SEO oriented, 1500-2000 Korean characters when possible.",
+    `- Article must be Korean, Naver Blog SEO oriented, and close to ${targetArticleLength} Korean characters including spaces when possible.`,
     researchTitleResult ? "- The article must fulfill the Writer Contract: articleMission, selectedTitle, topicThesis, readerPromise, firstSectionFocus, mustAnswer, mustCover, mustNotDo, and current bridge fields when required." : "",
     researchSearchNeed === "skip"
       ? "- Because search was skipped by Research/Title Agent, write from stable general explanation and the handoff only. Do not invent current facts, dates, amounts, conditions, official claims, or personal experience."
@@ -761,6 +783,7 @@ function buildPrompt({
     includeTitleImage ? "- Title image prompts may request short Korean headline text, key verified numbers, period, benefit, or condition text when it helps summarize the whole article. Keep text short and do not invent unverified facts." : "",
     bodyImageLimit > 0 ? "- Each body image must summarize the nearby section where its [IMAGE INSERT - n] marker appears. Use concrete nouns, named products/people/places/events, and the section's key comparison or process." : "",
     usesImages ? "- When writing image prompts, include the article title or section heading context, 2-4 concrete visual elements from the extracted facts, and a clear Korean blog editorial style. Do not invent facts that are not in the article." : "",
+    usesImages && imagePromptText ? "- Apply the user selected image prompt file instructions to titleImagePrompt and bodyImages[].prompt unless they conflict with verified facts, no-text rules, or the article context." : "",
     bodyImageLimit > 0 ? "- Body image prompts must keep the existing no-text policy: avoid readable text, Korean paragraphs, long labels, UI copy, and text-heavy charts. Prefer visual composition, objects, scenes, icons, and simple non-textual cues." : "",
     usesImages ? "- Do not return an image directory path as an image path. Each path must include the concrete image filename such as .png, .jpg, .jpeg, or .webp." : "",
     usesImages ? "- Do not call image generation tools. Do not spend time trying PowerShell, shell copy, or Node copy workarounds for images." : "",

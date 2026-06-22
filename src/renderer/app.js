@@ -17,7 +17,10 @@ const state = {
   editingCategoryId: "",
   shortContentCategories: [],
   selectedShortContentCategory: "",
-  shortContentTitles: []
+  shortContentTitles: [],
+  selectedShortContentTitles: [],
+  articlePromptFilePath: "",
+  imagePromptFilePath: ""
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -520,6 +523,7 @@ function renderAccounts() {
     empty.textContent = "등록된 계정이 없습니다.";
     list.appendChild(empty);
     renderCategories();
+    syncShortContentsFromAccount(null);
     updateSessionNotice();
     return;
   }
@@ -534,6 +538,7 @@ function renderAccounts() {
         <span title="${escapeHtml(account.naverId || "-")}">${escapeHtml(account.naverId || "-")}</span>
         <small>블로그 ${escapeHtml(account.blogId || account.naverId || "-")}</small>
         <small>카테고리 ${(account.categories || []).length}개</small>
+        <small>숏텐츠 ${(account.shortContentSelectedTitles || []).length}개 선택</small>
       </div>
       <div class="account-actions">
         ${sessionBadge(account)}
@@ -607,21 +612,13 @@ function renderCategories() {
   }
 
   for (const category of account.categories) {
-    const optionSummary = [
-      category.excludedTopics ? `제외: ${category.excludedTopics}` : "",
-      category.preferredTone ? `톤: ${category.preferredTone}` : "",
-      category.freshnessLevel && category.freshnessLevel !== "auto" ? `최신성: ${category.freshnessLevel}` : "",
-      category.searchChannel === "web" ? "검색: 웹" : "검색: 블로그",
-      category.trustBlogAsSource ? "블로그 신뢰" : ""
-    ].filter(Boolean).join(" · ");
     const row = document.createElement("div");
     row.className = `category-row${state.editingCategoryId === category.id ? " selected" : ""}`;
     row.innerHTML = `
       <input class="list-check" type="checkbox" ${category.checked !== false ? "checked" : ""} aria-label="자동 발행 카테고리 선택" />
       <div class="category-main">
         <strong>${escapeHtml(category.name)}</strong>
-        <span>${escapeHtml(category.keyword || "검색 키워드 없음")}</span>
-        ${optionSummary ? `<small>${escapeHtml(optionSummary)}</small>` : ""}
+        <span>블로그 발행 카테고리</span>
       </div>
       <div class="category-actions">
         <button type="button" class="ghost small" data-action="edit">수정</button>
@@ -654,6 +651,7 @@ function selectAccount(accountId) {
   fillAccountForm(account);
   clearCategoryForm();
   renderAccounts();
+  syncShortContentsFromAccount(account);
   saveAccountStoreNow();
 }
 
@@ -709,15 +707,13 @@ function setCategoryButtonLabel() {
 
 function fillCategoryForm(category = null) {
   $("#categoryName").value = category?.name || "";
-  $("#categoryKeyword").value = category?.keyword || "";
-  $("#categoryExcludedTopics").value = category?.excludedTopics || "";
-  $("#categoryPublishPurpose").value = category?.publishPurpose || "";
-  $("#categoryPreferredTone").value = category?.preferredTone || "";
-  $("#categoryFreshnessLevel").value = category?.freshnessLevel || "auto";
-  $("#categorySearchChannel").value = ["blog", "web"].includes(category?.searchChannel)
-    ? category.searchChannel
-    : "blog";
-  $("#categoryTrustBlogAsSource").checked = category?.trustBlogAsSource === true;
+  $("#categoryKeyword").value = category?.keyword || category?.name || "";
+  $("#categoryExcludedTopics").value = "";
+  $("#categoryPublishPurpose").value = "";
+  $("#categoryPreferredTone").value = "";
+  $("#categoryFreshnessLevel").value = "high";
+  $("#categorySearchChannel").value = "blog";
+  $("#categoryTrustBlogAsSource").checked = false;
 }
 
 function clearCategoryForm() {
@@ -738,10 +734,6 @@ function editCategory(category) {
 
 function hasCategoryName(category) {
   return Boolean(String(category?.name || "").trim());
-}
-
-function hasCategoryKeyword(category) {
-  return Boolean(String(category?.keyword || "").trim());
 }
 
 function autoTargetKey(target) {
@@ -779,6 +771,7 @@ function firstAutoTargetForAccount(accountId) {
 async function saveAccountStoreNow() {
   state.accountStore = await window.blogAuto.saveAccountStore(state.accountStore);
   renderAccounts();
+  syncShortContentsFromAccount(selectedAccount());
 }
 
 function normalizeAgentModels(models = {}) {
@@ -802,10 +795,44 @@ function applyAgentModels(models = {}) {
   }
 }
 
+function normalizeShortContentTitleCache(titles = []) {
+  return (Array.isArray(titles) ? titles : [])
+    .map((item, index) => ({
+      id: String(item?.id || `short_title_${index + 1}`),
+      title: String(item?.title || item || "").trim()
+    }))
+    .filter((item) => item.title);
+}
+
+function syncShortContentsFromAccount(account = selectedAccount()) {
+  const activeAccount = account || null;
+  state.selectedShortContentCategory = String(activeAccount?.shortContentCategory || "");
+  state.selectedShortContentTitles = Array.isArray(activeAccount?.shortContentSelectedTitles)
+    ? activeAccount.shortContentSelectedTitles.map((title) => String(title || "").trim()).filter(Boolean)
+    : [];
+  state.shortContentTitles = normalizeShortContentTitleCache(activeAccount?.shortContentTitleCache || []);
+  renderShortContentCategories(state.shortContentCategories);
+  renderShortContentTitles(state.shortContentTitles, state.selectedShortContentCategory);
+  $("#selectedTitle").textContent = state.selectedShortContentTitles[0] || "아직 선정 전";
+}
+
+function persistShortContentsToAccount() {
+  const account = selectedAccount();
+  if (!account) return null;
+  account.shortContentCategory = state.selectedShortContentCategory;
+  account.shortContentSelectedTitles = [...state.selectedShortContentTitles];
+  account.shortContentTitleCache = normalizeShortContentTitleCache(state.shortContentTitles);
+  return account;
+}
+
 function renderShortContentCategories(categories = []) {
   const container = $("#shortContentsCategoryList");
   if (!container) return;
   container.hidden = false;
+  if (!selectedAccount()) {
+    container.innerHTML = "<span class=\"hint\">숏텐츠를 관리할 계정을 먼저 선택하세요.</span>";
+    return;
+  }
   if (!categories.length) {
     container.innerHTML = "<span class=\"hint\">표시할 숏텐츠 카테고리가 없습니다.</span>";
     return;
@@ -822,6 +849,10 @@ function renderShortContentTitles(titles = [], categoryName = "") {
   const container = $("#shortContentsTitleList");
   if (!container) return;
   container.hidden = false;
+  if (!selectedAccount()) {
+    container.innerHTML = "<span class=\"hint\">계정을 선택하면 계정별 숏텐츠 제목을 관리할 수 있습니다.</span>";
+    return;
+  }
   const title = categoryName ? `<strong>${escapeHtml(categoryName)} 제목 20개</strong>` : "<strong>제목 20개</strong>";
   if (!titles.length) {
     container.innerHTML = `${title}<span class="hint">표시할 제목이 없습니다.</span>`;
@@ -830,15 +861,41 @@ function renderShortContentTitles(titles = [], categoryName = "") {
   container.innerHTML = [
     title,
     "<div class=\"shortcontents-title-items\">",
-    ...titles.map((item, index) => (
-      `<button class="shortcontents-title-item" type="button" data-title="${escapeHtml(item.title)}"><span>${index + 1}</span>${escapeHtml(item.title)}</button>`
-    )),
+    ...titles.map((item, index) => {
+      const selected = state.selectedShortContentTitles.includes(item.title) ? " selected" : "";
+      return `<button class="shortcontents-title-item${selected}" type="button" data-title="${escapeHtml(item.title)}"><span>${index + 1}</span>${escapeHtml(item.title)}</button>`;
+    }),
     "</div>"
   ].join("");
 }
 
+function fileNameFromPath(filePath = "") {
+  return String(filePath || "").split(/[\\/]/).filter(Boolean).pop() || "";
+}
+
+function renderPromptFileLabels() {
+  const articleLabel = $("#articlePromptFileName");
+  const imageLabel = $("#imagePromptFileName");
+  if (articleLabel) {
+    articleLabel.textContent = state.articlePromptFilePath
+      ? fileNameFromPath(state.articlePromptFilePath)
+      : "선택된 파일 없음";
+    articleLabel.title = state.articlePromptFilePath || "";
+  }
+  if (imageLabel) {
+    imageLabel.textContent = state.imagePromptFilePath
+      ? fileNameFromPath(state.imagePromptFilePath)
+      : "선택된 파일 없음";
+    imageLabel.title = state.imagePromptFilePath || "";
+  }
+}
+
 async function loadShortContentCategories() {
   const button = $("#loadShortContentsButton");
+  if (!selectedAccount()) {
+    addLog({ level: "warn", message: "숏텐츠 카테고리를 불러오려면 계정을 먼저 선택하세요.", at: new Date().toISOString() });
+    return;
+  }
   if (button) button.disabled = true;
   try {
     const result = await window.blogAuto.loadShortContentCategories();
@@ -859,10 +916,17 @@ async function loadShortContentCategories() {
 async function loadShortContentTitles(categoryName) {
   const category = String(categoryName || "").trim();
   if (!category) return;
+  if (!selectedAccount()) {
+    addLog({ level: "warn", message: "숏텐츠 제목을 관리할 계정을 먼저 선택하세요.", at: new Date().toISOString() });
+    return;
+  }
   state.selectedShortContentCategory = category;
+  state.selectedShortContentTitles = [];
   renderShortContentCategories(state.shortContentCategories);
   const result = await window.blogAuto.loadShortContentTitles(category);
   state.shortContentTitles = Array.isArray(result?.titles) ? result.titles : [];
+  persistShortContentsToAccount();
+  await saveAccountStoreNow();
   renderShortContentTitles(state.shortContentTitles, category);
   addLog({
     level: "info",
@@ -874,23 +938,34 @@ async function loadShortContentTitles(categoryName) {
 function collectForm(target = {}) {
   const account = target.account || selectedAccount();
   const category = target.category
-    || (account?.categories || []).find((item) => item.checked !== false && hasCategoryName(item) && hasCategoryKeyword(item))
+    || (account?.categories || []).find((item) => item.checked !== false && hasCategoryName(item))
     || (account?.categories || []).find((item) => item.checked !== false);
   const useSelectedAccount = Boolean(target.account || account);
+  const publishMode = $("#topicMode").value;
+  const accountSelectedTitles = Array.isArray(account?.shortContentSelectedTitles)
+    ? account.shortContentSelectedTitles.map((title) => String(title || "").trim()).filter(Boolean)
+    : [];
+  const selectedTitle = target.account
+    ? (accountSelectedTitles[0] || "")
+    : (state.selectedShortContentTitles[0] || accountSelectedTitles[0] || "");
   return {
     accountId: account?.id || "",
     naverId: useSelectedAccount ? (account?.naverId || "") : $("#naverId").value.trim(),
     blogId: useSelectedAccount ? (account?.blogId || account?.naverId || "") : ($("#blogId").value.trim() || $("#naverId").value.trim()),
     naverPassword: useSelectedAccount ? (account?.naverPassword || "") : $("#naverPassword").value,
-    topicMode: $("#topicMode").value,
+    topicMode: publishMode,
     repeatTermMinutes: Number($("#repeatTermMinutes").value || 60),
-    topic: $("#topic").value.trim(),
+    topic: ($("#topic").value.trim() || selectedTitle || category?.name || "").trim(),
     category: category?.name || "",
-    keyword: category?.keyword || "",
-    excludedTopics: category?.excludedTopics || "",
-    publishPurpose: category?.publishPurpose || "",
-    preferredTone: category?.preferredTone || "",
-    freshnessLevel: category?.freshnessLevel || "auto",
+    keyword: category?.keyword || category?.name || "",
+    excludedTopics: "",
+    publishPurpose: "",
+    preferredTone: $("#writingTone")?.value.trim() || category?.preferredTone || "",
+    writingTone: $("#writingTone")?.value.trim() || "",
+    articleLength: Number($("#articleLength")?.value || 1500),
+    articlePromptFilePath: state.articlePromptFilePath,
+    imagePromptFilePath: state.imagePromptFilePath,
+    freshnessLevel: "high",
     searchChannel: ["blog", "web"].includes(category?.searchChannel) ? category.searchChannel : "blog",
     trustBlogAsSource: category?.trustBlogAsSource === true,
     codexCmdPath: "codex",
@@ -899,7 +974,7 @@ function collectForm(target = {}) {
     naverSearchUrl: DEFAULT_NAVER_SEARCH_URL,
     googleSearchUrl: DEFAULT_GOOGLE_SEARCH_URL,
     naverEditorDomNotes: "",
-    publishAfterGenerate: $("#publishAfterGenerate").checked,
+    publishAfterGenerate: publishMode === "auto",
     publishVisibility: $("#publishVisibility").value,
     publishPrivate: $("#publishVisibility").value !== "public",
     publishScheduleMode: $("#publishScheduleMode").value,
@@ -921,7 +996,9 @@ function applySettings(settings) {
     publishVisibility: "#publishVisibility",
     publishScheduleMode: "#publishScheduleMode",
     reserveAfterHours: "#reserveAfterHours",
-    maxBodyImages: "#maxBodyImages"
+    maxBodyImages: "#maxBodyImages",
+    writingTone: "#writingTone",
+    articleLength: "#articleLength"
   };
   for (const [key, selector] of Object.entries(map)) {
     if (settings[key] !== undefined && $(selector)) {
@@ -932,6 +1009,9 @@ function applySettings(settings) {
   $("#includeTitleImage").checked = settings.includeTitleImage !== false;
   $("#imageAspectRatio").value = normalizeImageAspectRatio(settings.imageAspectRatio);
   $("#breakSentencesInBody").checked = settings.breakSentencesInBody !== false;
+  state.articlePromptFilePath = String(settings.articlePromptFilePath || "");
+  state.imagePromptFilePath = String(settings.imagePromptFilePath || "");
+  renderPromptFileLabels();
   applyAgentModels(settings.agentModels);
   if (settings.publishPrivate === false) $("#publishVisibility").value = "public";
   updateModeControls();
@@ -963,6 +1043,10 @@ async function saveSettingsNow() {
     imageAspectRatio: form.imageAspectRatio,
     maxBodyImages: form.maxBodyImages,
     breakSentencesInBody: form.breakSentencesInBody,
+    writingTone: form.writingTone,
+    articleLength: form.articleLength,
+    articlePromptFilePath: form.articlePromptFilePath,
+    imagePromptFilePath: form.imagePromptFilePath,
     agentModels: form.agentModels
   });
   await saveAccountStoreNow();
@@ -984,9 +1068,14 @@ function updateModeControls() {
   const isAuto = $("#topicMode").value === "auto";
   const isPrivatePublish = $("#publishVisibility").value !== "public";
   $("#repeatTermLabel").style.display = isAuto ? "grid" : "none";
-  $("#manualTopicLabel").style.display = isAuto ? "none" : "grid";
-  $("#publishAfterGenerate").checked = isAuto ? true : $("#publishAfterGenerate").checked;
+  $("#publishOptionsRow").style.display = isAuto ? "flex" : "none";
+  $("#manualTopicLabel").style.display = "none";
+  $("#publishAfterGenerate").checked = isAuto;
   $("#publishAfterGenerate").disabled = isAuto;
+  if (isAuto) {
+    $("#publishVisibility").value = "public";
+    $("#publishScheduleMode").value = "now";
+  }
   if (isPrivatePublish && $("#publishScheduleMode").value === "reserve") {
     $("#publishScheduleMode").value = "now";
   }
@@ -997,7 +1086,7 @@ function updateModeControls() {
 function getAutoTargets() {
   const targets = [];
   for (const account of state.accountStore.accounts.filter((item) => item.checked !== false)) {
-    for (const category of (account.categories || []).filter((item) => item.checked !== false && hasCategoryName(item) && hasCategoryKeyword(item))) {
+    for (const category of (account.categories || []).filter((item) => item.checked !== false && hasCategoryName(item))) {
       targets.push({ account, category });
     }
   }
@@ -1096,11 +1185,9 @@ async function startAutoPublishing(startTargetKey = "") {
   if (!checkedTargets.length) {
     throw new Error("자동 발행할 체크된 계정/카테고리 조합이 없습니다.");
   }
-  const checkedTargetsWithKeyword = checkedTargets.filter((target) => (
-    hasCategoryName(target.category) && hasCategoryKeyword(target.category)
-  ));
-  if (!checkedTargetsWithKeyword.length) {
-    throw new Error("자동 발행하려면 체크된 카테고리의 카테고리명과 키워드를 먼저 등록하세요.");
+  const checkedTargetsWithCategory = checkedTargets.filter((target) => hasCategoryName(target.category));
+  if (!checkedTargetsWithCategory.length) {
+    throw new Error("자동 발행하려면 체크된 카테고리의 블로그 카테고리명을 먼저 등록하세요.");
   }
   state.running = true;
   state.autoRunning = true;
@@ -1246,9 +1333,7 @@ async function startAutoPublishing(startTargetKey = "") {
 
 async function startManualJob() {
   const form = collectForm();
-  if (!form.topic) throw new Error("수동 방식에서는 주제가 필요합니다.");
   if (!form.category) throw new Error("선택 계정에서 카테고리를 체크하세요.");
-  if (!form.keyword) throw new Error("선택한 카테고리에 검색 키워드를 등록하세요.");
   if (form.publishAfterGenerate && !form.naverId) throw new Error("발행까지 진행하려면 작업할 계정을 선택하거나 등록하세요.");
   state.running = true;
   $("#startButton").disabled = true;
@@ -1287,6 +1372,7 @@ async function boot() {
     state.accountStore = store;
     renderAccounts();
     fillAccountForm(selectedAccount());
+    syncShortContentsFromAccount(selectedAccount());
   });
   window.blogAuto.onLog(addLog);
   window.blogAuto.onStatus((payload) => {
@@ -1356,6 +1442,47 @@ async function boot() {
     loadShortContentTitles(button.dataset.category).catch((error) => {
       addLog({ level: "error", message: `숏텐츠 제목 로드 실패: ${error.message}`, at: new Date().toISOString() });
     });
+  });
+  $("#shortContentsTitleList")?.addEventListener("click", (event) => {
+    const button = event.target.closest(".shortcontents-title-item");
+    if (!button) return;
+    const title = String(button.dataset.title || "").trim();
+    if (!title) return;
+    if (state.selectedShortContentTitles.includes(title)) {
+      state.selectedShortContentTitles = state.selectedShortContentTitles.filter((item) => item !== title);
+    } else {
+      state.selectedShortContentTitles.push(title);
+    }
+    persistShortContentsToAccount();
+    renderShortContentTitles(state.shortContentTitles, state.selectedShortContentCategory);
+    $("#selectedTitle").textContent = state.selectedShortContentTitles[0] || "아직 선정 전";
+    saveAccountStoreNow().catch((error) => {
+      addLog({ level: "error", message: `숏텐츠 선택 저장 실패: ${error.message}`, at: new Date().toISOString() });
+    });
+  });
+  $("#chooseArticlePromptFileButton")?.addEventListener("click", async () => {
+    const filePath = await window.blogAuto.choosePromptFile("글 작성 프롬프트 파일 선택");
+    if (!filePath) return;
+    state.articlePromptFilePath = filePath;
+    renderPromptFileLabels();
+    scheduleSettingsSave();
+  });
+  $("#clearArticlePromptFileButton")?.addEventListener("click", () => {
+    state.articlePromptFilePath = "";
+    renderPromptFileLabels();
+    scheduleSettingsSave();
+  });
+  $("#chooseImagePromptFileButton")?.addEventListener("click", async () => {
+    const filePath = await window.blogAuto.choosePromptFile("이미지 프롬프트 파일 선택");
+    if (!filePath) return;
+    state.imagePromptFilePath = filePath;
+    renderPromptFileLabels();
+    scheduleSettingsSave();
+  });
+  $("#clearImagePromptFileButton")?.addEventListener("click", () => {
+    state.imagePromptFilePath = "";
+    renderPromptFileLabels();
+    scheduleSettingsSave();
   });
 
   $("#addAccountButton").addEventListener("click", async () => {
@@ -1465,21 +1592,21 @@ async function boot() {
   $("#addCategoryButton").addEventListener("click", async () => {
     const account = selectedAccount();
     const name = $("#categoryName").value.trim();
-    const keyword = $("#categoryKeyword").value.trim();
-    const excludedTopics = $("#categoryExcludedTopics").value.trim();
-    const publishPurpose = $("#categoryPublishPurpose").value.trim();
-    const preferredTone = $("#categoryPreferredTone").value.trim();
-    const freshnessLevel = $("#categoryFreshnessLevel").value || "auto";
-    const searchChannel = $("#categorySearchChannel").value || "blog";
-    const trustBlogAsSource = $("#categoryTrustBlogAsSource").checked === true;
+    const keyword = name;
+    const excludedTopics = "";
+    const publishPurpose = "";
+    const preferredTone = "";
+    const freshnessLevel = "high";
+    const searchChannel = "blog";
+    const trustBlogAsSource = false;
     if (!account) return;
-    if (!name || !keyword) {
+    if (!name) {
       addLog({
         level: "warn",
-        message: "카테고리를 등록하려면 카테고리명과 검색 키워드를 모두 입력하세요.",
+        message: "카테고리를 등록하려면 블로그 카테고리명을 입력하세요.",
         at: new Date().toISOString()
       });
-      setRunState("failed", "카테고리명/키워드 필요");
+      setRunState("failed", "카테고리명 필요");
       return;
     }
     account.categories = account.categories || [];
@@ -1568,6 +1695,8 @@ async function boot() {
     });
   });
   $("#topicMode").addEventListener("change", updateModeControls);
+  $("#writingTone")?.addEventListener("input", scheduleSettingsSave);
+  $("#articleLength")?.addEventListener("change", scheduleSettingsSave);
   $("#publishVisibility").addEventListener("change", updateModeControls);
   $("#publishScheduleMode").addEventListener("change", updateModeControls);
   $("#jobForm").querySelectorAll("input, select, textarea").forEach((control) => {

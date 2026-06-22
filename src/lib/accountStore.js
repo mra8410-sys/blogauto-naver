@@ -14,35 +14,37 @@ function makeId(prefix = "acct") {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function normalizeSearchChannel(value) {
-  return ["blog", "web"].includes(value) ? value : "blog";
+function normalizeSearchChannel() {
+  return "blog";
 }
 
 function normalizeCategory(category) {
   if (typeof category === "string") {
+    const name = category.trim();
     return {
       id: makeId("cat"),
-      name: category.trim(),
-      keyword: "",
+      name,
+      keyword: name,
       excludedTopics: "",
       publishPurpose: "",
       preferredTone: "",
-      freshnessLevel: "auto",
+      freshnessLevel: "high",
       searchChannel: "blog",
       trustBlogAsSource: false,
       checked: true
     };
   }
+  const name = String(category?.name || category?.category || "").trim();
   return {
     id: String(category?.id || makeId("cat")),
-    name: String(category?.name || category?.category || "").trim(),
-    keyword: String(category?.keyword || "").trim(),
+    name,
+    keyword: String(category?.keyword || name).trim(),
     excludedTopics: String(category?.excludedTopics || "").trim(),
     publishPurpose: String(category?.publishPurpose || "").trim(),
     preferredTone: String(category?.preferredTone || "").trim(),
     freshnessLevel: ["auto", "low", "medium", "high"].includes(category?.freshnessLevel)
       ? category.freshnessLevel
-      : "auto",
+      : "high",
     searchChannel: normalizeSearchChannel(category?.searchChannel),
     trustBlogAsSource: category?.trustBlogAsSource === true,
     checked: category?.checked !== false
@@ -78,7 +80,19 @@ function normalizeAccount(account) {
       ? account.sessionStatus
       : "unknown",
     sessionCheckedAt: String(account?.sessionCheckedAt || ""),
-    categories
+    categories,
+    shortContentCategory: String(account?.shortContentCategory || "").trim(),
+    shortContentSelectedTitles: Array.isArray(account?.shortContentSelectedTitles)
+      ? account.shortContentSelectedTitles.map((title) => String(title || "").trim()).filter(Boolean)
+      : [],
+    shortContentTitleCache: Array.isArray(account?.shortContentTitleCache)
+      ? account.shortContentTitleCache
+        .map((item, index) => ({
+          id: String(item?.id || `short_title_${index + 1}`),
+          title: String(item?.title || item || "").trim()
+        }))
+        .filter((item) => item.title)
+      : []
   };
 }
 
