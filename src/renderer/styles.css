@@ -172,6 +172,43 @@ h2 {
   width: 100%;
 }
 
+.shortcontents-panel {
+  border: 1px solid var(--border);
+  background: var(--surface-muted);
+  padding: 10px;
+  margin-bottom: 10px;
+}
+
+.shortcontents-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.shortcontents-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 10px;
+  max-height: 150px;
+  overflow: auto;
+}
+
+.shortcontents-chip {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.shortcontents-chip:hover,
+.shortcontents-chip:focus-visible {
+  border-color: var(--primary);
+  color: var(--primary-dark);
+}
+
 .header-actions,
 .panel-head,
 .inline-row,

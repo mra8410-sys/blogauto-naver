@@ -4,6 +4,7 @@ contextBridge.exposeInMainWorld("blogAuto", {
   getInitialData: () => ipcRenderer.invoke("app:getInitialData"),
   openChromeInstallAndQuit: () => ipcRenderer.invoke("chrome:installAndQuit"),
   refreshCodexUsage: () => ipcRenderer.invoke("codex:refreshUsage"),
+  loadShortContentCategories: () => ipcRenderer.invoke("shortcontents:categories"),
   saveSettings: (settings) => ipcRenderer.invoke("settings:save", settings),
   saveAccountStore: (store) => ipcRenderer.invoke("accounts:save", store),
   chooseAccountSampleImage: (accountId) => ipcRenderer.invoke("accounts:chooseSampleImage", accountId),

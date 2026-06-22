@@ -14,7 +14,8 @@ const state = {
   accountStore: { selectedAccountId: "", accounts: [] },
   accountManagerOpen: false,
   categoryManagerOpen: false,
-  editingCategoryId: ""
+  editingCategoryId: "",
+  shortContentCategories: []
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -799,6 +800,38 @@ function applyAgentModels(models = {}) {
   }
 }
 
+function renderShortContentCategories(categories = []) {
+  const container = $("#shortContentsCategoryList");
+  if (!container) return;
+  container.hidden = false;
+  if (!categories.length) {
+    container.innerHTML = "<span class=\"hint\">표시할 숏텐츠 카테고리가 없습니다.</span>";
+    return;
+  }
+  container.innerHTML = categories
+    .map((category) => `<button class="shortcontents-chip" type="button" data-category="${escapeHtml(category.name)}">${escapeHtml(category.name)}</button>`)
+    .join("");
+}
+
+async function loadShortContentCategories() {
+  const button = $("#loadShortContentsButton");
+  if (button) button.disabled = true;
+  try {
+    const result = await window.blogAuto.loadShortContentCategories();
+    state.shortContentCategories = Array.isArray(result?.categories) ? result.categories : [];
+    renderShortContentCategories(state.shortContentCategories);
+    addLog({
+      level: "info",
+      message: `숏텐츠 카테고리 ${state.shortContentCategories.length}개를 불러왔습니다.`,
+      at: new Date().toISOString()
+    });
+  } catch (error) {
+    addLog({ level: "error", message: `숏텐츠 카테고리 로드 실패: ${error.message}`, at: new Date().toISOString() });
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
 function collectForm(target = {}) {
   const account = target.account || selectedAccount();
   const category = target.category
@@ -1276,6 +1309,8 @@ async function boot() {
       addLog({ level: "error", message: error.message, at: new Date().toISOString() });
     }
   });
+
+  $("#loadShortContentsButton")?.addEventListener("click", loadShortContentCategories);
 
   $("#addAccountButton").addEventListener("click", async () => {
     const naverId = $("#naverId").value.trim();
