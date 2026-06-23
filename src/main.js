@@ -369,11 +369,18 @@ async function resolveTopicInput(form, category, log) {
     };
   }
 
-  const seedKeyword = manualKeyword || category;
-  log("자동 주제 모드: 카테고리와 키워드를 Research/Title Agent에 전달합니다.");
+  if (manualTopic) {
+    log("자동 주제 모드: 선택된 숏텐츠 제목을 고정 주제로 사용합니다.");
+    return {
+      topic: manualTopic,
+      keyword: ""
+    };
+  }
+
+  log("자동 주제 모드: 선택된 숏텐츠 제목과 카테고리를 기준으로 진행합니다.");
   return {
     topic: "",
-    keyword: seedKeyword
+    keyword: ""
   };
 }
 
@@ -463,7 +470,7 @@ async function startJob(form) {
   const accountStore = readAccountStore(runtimeRoot, settings);
   const account = resolveAccount(form, accountStore);
   const category = String(form.category || "").trim();
-  const categoryKeyword = String(form.keyword || "").trim();
+  const categoryKeyword = "";
   const naverId = String(form.naverId || account.naverId || "").trim();
   const blogId = String(form.blogId || account.blogId || naverId).trim();
   const naverPassword = String(form.naverPassword || account.naverPassword || "");
@@ -477,27 +484,24 @@ async function startJob(form) {
   const maxBodyImages = Math.min(10, Math.max(0, Number.isFinite(Number(form.maxBodyImages)) ? Number(form.maxBodyImages) : 2));
   const breakSentencesInBody = form.breakSentencesInBody !== false;
   const agentModels = form.agentModels || settings.agentModels || {};
-  const shouldPublish = form.publishAfterGenerate === true || form.topicMode === "auto";
+  const shouldUploadToNaver = form.publishAfterGenerate === true || form.topicMode === "auto";
+  const shouldFinalPublish = String(form.topicMode || "manual").toLowerCase() === "auto";
   if (!category) {
     activeJob = null;
     throw new Error("카테고리는 필수입니다.");
   }
-  if (!categoryKeyword) {
-    activeJob = null;
-    throw new Error("카테고리별 검색 키워드는 필수입니다.");
-  }
-  if (shouldPublish && !naverId) {
+  if (shouldUploadToNaver && !naverId) {
     activeJob = null;
     throw new Error("발행까지 진행하려면 Naver ID가 필요합니다.");
   }
-  if (shouldPublish) {
+  if (shouldUploadToNaver) {
     safeLog(jobId, `Naver 로그인 ID: ${naverId} / 블로그 주소 ID: ${blogId}`);
   }
 
   let preparedNaverSession = null;
   let browserProfileDir = getAccountProfileDir(runtimeRoot, account);
   try {
-    if (shouldPublish) {
+    if (shouldUploadToNaver) {
       preparedNaverSession = await verifyPublishSessionBeforeGeneration({
         runtimeRoot,
         account,
@@ -575,7 +579,7 @@ async function startJob(form) {
     naverId,
     blogId,
     naverPassword,
-    topic,
+    topic: "",
     keyword,
     category,
     codexCmdPath,
@@ -584,7 +588,7 @@ async function startJob(form) {
     naverSearchUrl: form.naverSearchUrl || "",
     googleSearchUrl: form.googleSearchUrl || "",
     naverEditorDomNotes: form.naverEditorDomNotes || "",
-    publishAfterGenerate: shouldPublish,
+    publishAfterGenerate: shouldUploadToNaver,
     publishPrivate,
     topicMode: form.topicMode || "manual",
     repeatTermMinutes: Number(form.repeatTermMinutes || 60),
@@ -613,15 +617,15 @@ async function startJob(form) {
       .map((entry) => ({ title: entry.title, embedding: entry.embedding }));
 
     const usesImages = includeTitleImage || maxBodyImages > 0;
-    const generationSubject = topic || `${category} ${keyword}`.trim();
+    const generationSubject = "";
     const modelSnapshot = {
-      main: agentModels.main || "high",
-      research: agentModels.research || "high",
-      writer: agentModels.writer || "high",
-      image: agentModels.image || "medium"
+      main: agentModels.main || "low",
+      research: agentModels.research || "medium",
+      writer: agentModels.writer || "medium",
+      image: agentModels.image || "low"
     };
     safeLog(jobId, `Agent 모델 설정: Main ${modelSnapshot.main}, Research/Title ${modelSnapshot.research}, Writer ${modelSnapshot.writer}, Image Worker ${modelSnapshot.image}`);
-    safeLog(jobId, `Codex ${usesImages ? "본문/이미지 프롬프트" : "본문"} 생성 시작: ${generationSubject}`);
+    safeLog(jobId, `Codex ${usesImages ? "본문/이미지 프롬프트" : "본문"} 생성 시작${generationSubject ? `: ${generationSubject}` : ""}`);
     const generationStartedAt = Date.now();
     let generationPhase = "준비 중";
     const generationHeartbeat = setInterval(() => {
@@ -682,7 +686,7 @@ async function startJob(form) {
         onResearchTitle: (researchResult) => {
           latestResearchTitleResult = researchResult || null;
           latestLaneResult = normalizeResearchLaneResult(researchResult, keywordLanePlan);
-          const selectedTitle = String(researchResult.finalTitle || researchResult.selectedTitle || "").trim();
+          const selectedTitle = String(researchResult?.finalTitle || researchResult?.selectedTitle || "").trim();
           emit("job:selectedTitle", {
             jobId,
             title: selectedTitle,
@@ -874,8 +878,14 @@ async function startJob(form) {
     let publishStatus = "generated";
     let publishReason = "";
 
-    if (shouldPublish) {
-      updateStatus(jobId, "publishing", `Naver 블로그 ${publishVisibility === "public" ? "전체공개" : "비공개"} 발행 자동화`);
+    if (shouldUploadToNaver) {
+      updateStatus(
+        jobId,
+        "publishing",
+        shouldFinalPublish
+          ? `Naver 블로그 ${publishVisibility === "public" ? "전체공개" : "비공개"} 발행 자동화`
+          : "Naver 블로그 글쓰기 저장 자동화"
+      );
       await publishToNaver({
         accountId: account.id || "",
         naverId,
@@ -897,14 +907,21 @@ async function startJob(form) {
         browserProfileDir,
         preparedContext: preparedNaverSession?.context,
         preparedPage: preparedNaverSession?.page,
+        draftOnly: !shouldFinalPublish,
         log: (message, level) => safeLog(jobId, message, level)
       });
       if (account.id) {
         updateAccountSession(runtimeRoot, account.id, "valid", settings);
         emitAccountStore(runtimeRoot);
       }
-      publishStatus = "success";
-      updateStatus(jobId, "success", "발행 완료");
+      if (shouldFinalPublish) {
+        publishStatus = "success";
+        updateStatus(jobId, "success", "발행 완료");
+      } else {
+        publishStatus = "generated";
+        publishReason = "수동 모드로 네이버 글쓰기 저장까지 완료했습니다. 최종 발행은 사용자가 직접 진행해야 합니다.";
+        updateStatus(jobId, "generated", "네이버 저장 완료, 수동 발행 대기");
+      }
     } else {
       publishReason = "사용자가 발행 실행을 끄고 생성만 실행했습니다.";
       updateStatus(jobId, "generated", "본문 생성 완료, 발행 대기");

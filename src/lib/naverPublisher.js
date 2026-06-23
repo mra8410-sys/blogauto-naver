@@ -2210,6 +2210,15 @@ async function publishToNaver(options) {
       await assertNaverSessionActive(page, selectors, log, "저장");
     }
 
+    if (options.draftOnly === true) {
+      if (saveButton) {
+        log("수동 모드: 저장만 완료하고 최종 발행은 진행하지 않습니다.");
+      } else {
+        log("수동 모드: 저장 버튼을 찾지 못해 최종 발행 없이 중단합니다.", "warn");
+      }
+      return;
+    }
+
     await assertNaverSessionActive(page, selectors, log, "발행 설정 열기 전");
     const publishOpened = await clickFirstVisible(page, selectors.publishButton, "발행 버튼", log);
     if (!publishOpened) {

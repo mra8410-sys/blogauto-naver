@@ -4,11 +4,11 @@ const os = require("node:os");
 const { spawn } = require("node:child_process");
 
 const DEFAULT_AGENT_MODELS = {
-  main: "high",
-  research: "high",
-  writer: "high",
-  image: "medium",
-  imageStyle: "medium"
+  main: "low",
+  research: "medium",
+  writer: "medium",
+  image: "low",
+  imageStyle: "low"
 };
 const VALID_AGENT_MODEL_EFFORTS = new Set(["low", "medium", "high", "xhigh"]);
 const DEFAULT_IMAGE_ASPECT_RATIO = "16:9";
@@ -598,6 +598,10 @@ function readOptionalPromptFile(filePath = "") {
   }
 }
 
+function hasArticlePromptMode(filePath = "") {
+  return Boolean(readOptionalPromptFile(filePath));
+}
+
 function buildPrompt({
   topic,
   keyword,
@@ -631,7 +635,9 @@ function buildPrompt({
   const usesImages = includeTitleImage !== false || bodyImageLimit > 0;
   const articlePromptText = readOptionalPromptFile(articlePromptFilePath);
   const imagePromptText = readOptionalPromptFile(imagePromptFilePath);
+  const usesArticlePromptMode = Boolean(articlePromptText);
   const researchSearchNeed = String(researchTitleResult?.searchNeed || "").toLowerCase();
+  const selectedFinalTitle = String(researchTitleResult?.finalTitle || researchTitleResult?.selectedTitle || "").trim();
   const writerContract = buildWriterContract(researchTitleResult, {
     topic,
     keyword,
@@ -657,6 +663,16 @@ function buildPrompt({
     "- Tone priority: explicit Preferred tone > Writer Contract tone > default human Naver Blog voice. If Preferred tone conflicts with default style rules, follow Preferred tone while preserving factual accuracy, safety, and title/body promise.",
     articlePromptText ? "User selected article prompt file instructions:" : "",
     articlePromptText ? articlePromptText : "",
+    usesArticlePromptMode ? "" : "",
+    usesArticlePromptMode ? "App execution override for the selected article prompt file:" : "",
+    usesArticlePromptMode ? "- The selected article prompt file is the primary writing standard and replaces the default app style/structure rules, except for this app's JSON output shape, source-safety boundaries, selected keyword/title routing, and [SECTION - ...] marker conversion." : "",
+    usesArticlePromptMode ? `- Treat the selected short-content title as the prompt input keyword: ${topic}` : "",
+    usesArticlePromptMode ? `- Use this internally selected hook title as the final article title: ${selectedFinalTitle || "(choose from Research/Title result)"}` : "",
+    usesArticlePromptMode ? "- Execute only stages 0, 1, 2, 3, and 4 from the selected prompt file. Do not execute stage 5 or later, and do not execute any image stage from that prompt." : "",
+    usesArticlePromptMode ? "- The prompt file may ask to show title candidates or ask the user to choose. In this app, do not ask the user. Internally generate candidates, choose the strongest curiosity/hooking title, and write the article JSON directly." : "",
+    usesArticlePromptMode ? "- If the selected prompt file asks for more sources than the app provides, use only the app-provided search candidates and do not fail solely because fewer than that source count is available." : "",
+    usesArticlePromptMode ? "- Convert the prompt file's stage-3 subheadings into standalone article markers exactly like [SECTION - 소제목]." : "",
+    usesArticlePromptMode ? "- Keep the final JSON shape required by this app even when the selected prompt file describes a conversational output format." : "",
     imagePromptText ? "User selected image prompt file instructions:" : "",
     imagePromptText ? imagePromptText : "",
     `Freshness level: ${freshnessLevel || "auto"}`,
@@ -682,7 +698,7 @@ function buildPrompt({
     researchTitleResult ? "- The Writer Contract is the only writing brief. Use source candidates and the full Research/Title handoff only to support facts, limits, and source boundaries." : "",
     researchTitleResult ? "- If the full handoff or source candidates conflict with the Writer Contract, keep the selected title/topic and return status \"failed\" rather than drifting." : "",
     researchTitleResult ? "- Category publishing direction may include topic-selection notes for Research/Title Agent. As Writer Agent, treat it only as category scope and reader intent, not as an instruction to perform research, select a topic, or change the selected title." : "",
-    researchTitleResult ? "- If Writer Contract says currentBridgeRequired is true, the article must explain both the older anchorEvent and the currentPeg/progress. If currentBridgeSatisfied is not true or currentPeg is missing, return status \"failed\" instead of writing a stale current-issue article." : "",
+    researchTitleResult ? "- If Writer Contract says currentBridgeRequired is true, explain the current web/blog discussion and avoid definite official claims when official confirmation is absent. Do not fail solely because currentBridgeSatisfied is not true if directly related candidates exist." : "",
     researchTitleResult ? "" : "",
     "Instruction harness:",
     researchTitleResult ? "- You are the Writer Agent. Do not create a new topic and do not change the selected title from the Research/Title Agent." : "",
@@ -715,8 +731,11 @@ function buildPrompt({
     "",
     "Source quality summary:",
     JSON.stringify(sourceQuality || { status: "unknown" }, null, 2),
+    usesArticlePromptMode ? "- Article prompt mode does not require app-provided search candidates. Source quality \"skipped\" or empty source candidates are acceptable; write from the selected prompt file, the short-content keyword, and the Research/Title handoff." : "",
     "- If Source quality status is \"insufficient\", immediately write the failed JSON described below and stop. Do not write an explanatory article.",
-    "- If Source quality status is \"skipped\", continue only when the Research/Title Agent marked searchNeed as \"skip\" and the topic is not fact-risky or current/date-bound.",
+    usesArticlePromptMode
+      ? "- If Source quality status is \"skipped\", continue in article prompt mode. Avoid precise current prices, deadlines, tax amounts, or policy conditions unless they are present in the prompt/keyword/handoff."
+      : "- If Source quality status is \"skipped\", continue only when the Research/Title Agent marked searchNeed as \"skip\" and the topic is not fact-risky or current/date-bound.",
     "- If sourceQuality.topicMatchedCandidates is 0 for a manual Topic, treat it as insufficient support unless the excerpts clearly use synonyms for the same subject/event.",
     "- Even when Source quality status is \"usable\", you must still fail if the excerpts cannot answer the locked Topic thesis. Broad related information is not enough.",
     "- Failure is a normal valid output. If you cannot support the post from extracted excerpts, you must set status to \"failed\". Do not try to be helpful by writing a caveat-filled article.",
@@ -728,15 +747,20 @@ function buildPrompt({
     "- Write a JSON file at the exact Output JSON path.",
     "- The JSON file must be UTF-8 and Korean text must not be mojibake or escaped into a broken encoding.",
     "- JSON shape: { \"status\": \"success\" | \"failed\", \"failureReason\": string, \"title\": string, \"article\": string, \"tags\": string[], \"bodyImages\": [{\"sequence\": number, \"path\": string, \"prompt\": string}], \"titleImagePath\": string, \"titleImagePrompt\": string, \"notes\": string[] }.",
-    "- If the extracted excerpts are missing, too thin, unrelated to the locked Topic thesis, or cannot support a publishable post, do not write an explanatory article.",
+    usesArticlePromptMode
+      ? "- Do not fail solely because extracted excerpts are missing; in article prompt mode the selected prompt file and short-content keyword are the writing basis."
+      : "- If the extracted excerpts are missing, too thin, unrelated to the locked Topic thesis, or cannot support a publishable post, do not write an explanatory article.",
     "- In that failure case, set status to \"failed\", set failureReason to a concise Korean reason, set title and article to empty strings, set bodyImages to [], set titleImagePath to \"\", and put the reason in notes.",
     "- In a failure case, do not generate images and do not write article sections explaining why writing is difficult.",
     "- Only set status to \"success\" when the remaining extracted excerpts support a real article.",
     "- If status is \"failed\", the desktop app will record failure history and stop the cycle. That is the correct behavior.",
     `- Article must be Korean, Naver Blog SEO oriented, and close to ${targetArticleLength} Korean characters including spaces when possible.`,
+    usesArticlePromptMode ? "- In article prompt mode, if any default app writing instruction below conflicts with the selected article prompt file, follow the selected article prompt file." : "",
     researchTitleResult ? "- The article must fulfill the Writer Contract: articleMission, selectedTitle, topicThesis, readerPromise, firstSectionFocus, mustAnswer, mustCover, mustNotDo, and current bridge fields when required." : "",
     researchSearchNeed === "skip"
-      ? "- Because search was skipped by Research/Title Agent, write from stable general explanation and the handoff only. Do not invent current facts, dates, amounts, conditions, official claims, or personal experience."
+      ? (usesArticlePromptMode
+        ? "- Because app search was skipped by article prompt mode, write from the selected prompt file, the short-content keyword, and the Research/Title handoff. Use cautious wording for current facts, dates, amounts, conditions, official claims, and generated experience-style passages."
+        : "- Because search was skipped by Research/Title Agent, write from stable general explanation and the handoff only. Do not invent current facts, dates, amounts, conditions, official claims, or personal experience.")
       : "- Do not write a fresh generic article from prior knowledge. Summarize and reorganize the extracted candidate excerpts.",
     "- Build the title from the locked Topic thesis and directly supporting excerpts, not from Category, Optional keyword, or a broad common theme.",
     "- The article must synthesize overlapping facts, dates, names, programs, events, products, releases, causes, effects, reactions, and implications found in excerpts that support the locked Topic thesis.",
@@ -748,7 +772,7 @@ function buildPrompt({
     "- The article body must never narrate the agent's research process, source collection process, or verification workflow.",
     "- Category publishing direction is internal guidance. Do not copy it into the article body, do not justify the category, and do not open with a defensive contrast such as 'this is not a general guide/advice'.",
     "- The first section must answer the title from the reader's point of view: what the topic is, who should care, why it matters, and what the reader should understand or check next.",
-    "- When the topic uses an older anchorEvent as a current issue, the first section must bridge it to the currentPeg: current status, recent procedure, new ruling/order, settlement/dismissal, policy change, official position shift, or another source-backed reason it matters now.",
+    "- When the topic uses an older anchorEvent as a current issue, the first section must bridge it to the currentPeg or current web/blog discussion. If official confirmation is absent, present it as online discussion/reporting flow rather than confirmed fact.",
     "- Source attribution is allowed only as reader-facing verification guidance. Do not make source verification itself the main content.",
     "- For policy, support program, recruitment, education, training, money, price, schedule, deadline, or application topics, include practical reader sections for target/eligibility, support details, application or checking path, variable items to verify, and cautions. If the handoff cannot support those sections, fail instead of writing a shallow article.",
     "- The reader should feel the post is explaining the Topic itself: what happened, why it matters, what is confirmed, what is uncertain, who is affected, and what to watch next.",
@@ -761,8 +785,8 @@ function buildPrompt({
     "- If you would write 첫째/둘째/첫 번째/두 번째 as an item label, convert that item label into a [SECTION - ...] marker instead of keeping it inside a paragraph.",
     "- Section marker text must be concise, natural Korean, reader-facing, and suitable as a Naver Blog section heading. Avoid headings that describe research/source process instead of reader value.",
     "- For events, job fairs, exhibitions, contests, applications, recruitment notices, sales, deadlines, or any date-bound information: exclude anything whose event date, application period, deadline, or relevant operating period is already past relative to the Current writing date.",
-    "- If a date-bound candidate has no confirmable current or future date from an official/reliable source, do not present it as an upcoming/current opportunity. You may mention it only as a general example without implying availability.",
-    "- Prefer official/current pages for date-bound information and record in notes that outdated or unconfirmed date-bound candidates were excluded when applicable.",
+    "- If a date-bound candidate has no confirmable current or future date from an official/reliable source, avoid definitive availability wording. You may summarize what related web/blog candidates say with caution.",
+    "- Prefer official/current pages when available, but blog/web candidates are acceptable for trend aggregation when written cautiously.",
     bodyImageLimit > 0
       ? "- Insert image markers exactly as [IMAGE INSERT - 1], [IMAGE INSERT - 2], etc where images belong."
       : "- Do not insert any [IMAGE INSERT - n] markers in the article body.",
@@ -810,12 +834,14 @@ function buildResearchTitlePrompt({
   excludedTopics = "",
   publishPurpose = "",
   preferredTone = "",
+  articlePromptFilePath = "",
   freshnessLevel = "auto",
   keywordLanes = [],
   recommendedKeywordLanes = []
 }) {
   const resultPath = path.join(jobDir, "research-title-result.json");
   const hasSearchCandidates = Array.isArray(searchResults) && searchResults.length > 0;
+  const usesArticlePromptMode = hasArticlePromptMode(articlePromptFilePath);
   const laneList = Array.isArray(keywordLanes) ? keywordLanes : [];
   const recommendedLaneList = Array.isArray(recommendedKeywordLanes) ? recommendedKeywordLanes : [];
   return [
@@ -854,20 +880,34 @@ function buildResearchTitlePrompt({
     hasSearchCandidates
       ? ""
       : "- When search candidates are absent, do not perform web searches, browser actions, network fetches, or shell/file reads for research. Decide searchNeed from the user's category/topic/keyword only, then write the output JSON. Use shell only if it is needed to write the JSON result file.",
-    "- If a user direct topic exists and topicMode is manual, preserve that topic. Search results can refine expression and verify facts, but must not replace the user's topic.",
+    usesArticlePromptMode
+      ? "- Article prompt mode is active. Treat User direct topic as the selected short-content input keyword, not as the final title. Do not preserve it exactly as finalTitle."
+      : "- If a User direct topic exists, treat it as the fixed selected short-content title regardless of Topic mode. Preserve it as finalTitle exactly unless it is unsafe or impossible to support.",
+    usesArticlePromptMode
+      ? "- Do not request app-provided search candidates in article prompt mode. Set searchNeed to \"skip\" unless the keyword is impossible or unsafe to write about."
+      : "",
+    usesArticlePromptMode
+      ? "- For the selected prompt file's information-collection stage, create a concise internal brief from the short-content keyword, general domain knowledge, and cautious uncertainty wording. Do not perform web searches or ask the app to search."
+      : "",
+    usesArticlePromptMode
+      ? "- Generate multiple hook/curiosity Naver Blog title candidates from the short-content keyword and the selected prompt file's title strategy, then choose one finalTitle yourself. Do not ask the user to choose."
+      : "- If a User direct topic exists, use Category only as the Naver blog category/routing context and use searchQueries only to support that title. Do not replace the title with a Category keyword, market keyword, or broader SEO angle.",
+    usesArticlePromptMode
+      ? "- The chosen finalTitle should have curiosity and click appeal while staying fact-safe: use concrete numbers or tension only when supported, avoid buy/sell commands, guaranteed returns, and unsupported sensational claims."
+      : "",
     "- If no direct topic exists or topicMode is auto, derive one narrow candidate topic from a single Keyword lane. If current facts are required, return searchNeed light/normal/strict and wait for app-provided search candidates instead of verifying facts yourself.",
     "- Treat Current writing date as an internal freshness reference, not as title material. Put a year/month in finalTitle only when that date is part of the confirmed event, policy, product, deadline, edition, or source-backed fact itself.",
-    "- Current bridge rule: when a selected topic is anchored in an older event but framed as a current issue, separate anchorEvent from currentPeg. anchorEvent is the original event/date; currentPeg is the source-backed current reason to write now, such as recent progress, ruling, order, discovery, settlement, dismissal, official statement, policy change, deadline, application status, product change, price/schedule update, or similar current development.",
-    "- For strict/current topics, if anchorEvent exists and currentPeg cannot be confirmed from usable sources, do not return PASS. Return REVISION/BLOCK and make searchQueries seek the currentPeg rather than repeating only the old event.",
-    "- If currentBridgeRequired is true, currentBridgeSatisfied may be true only when currentPeg has a date/summary and at least one usable source boundary or usable source supports it.",
-    "- Determine search need as one of: skip, light, normal, strict. Map freshness level low/medium/high to lighter or stricter research, but official/current facts still require strict handling.",
+    "- Current bridge rule: when a selected topic is anchored in an older event but framed as a current issue, separate anchorEvent from currentPeg. For this app, Naver Blog, Google Blog, and general web candidates may establish the current web discussion even when official confirmation is absent.",
+    "- For strict/current topics, do not block solely because official/company/press confirmation is missing. If search candidates are directly related to the title, return PASS with cautious source boundaries and uncertainty notes.",
+    "- If currentBridgeRequired is true, currentBridgeSatisfied may be true when currentPeg has a date/summary supported by directly relevant Naver/Google/web candidates; official sources are preferred but not required.",
+    "- Determine search need as one of: skip, light, normal, strict. Map freshness level low/medium/high to lighter or stricter research, but strict means gather more related web candidates, not require official proof.",
     "- Use searchNeed \"skip\" only for stable concept/explanation/opinion/experience-style topics that can be written safely without current facts.",
-    "- Use searchNeed \"light\", \"normal\", or \"strict\" when current search flow, NAVER exposure, Google/official fact checks, or official/current sources are needed.",
+    "- Use searchNeed \"light\", \"normal\", or \"strict\" when current search flow, NAVER exposure, Google/blog/web candidates are needed.",
     "- If search candidates are absent and searchNeed is light/normal/strict, return status \"REVISION\" quickly unless the topic must be blocked immediately. In that case, describe what search or official facts are needed in writerBrief, coreQuestions, and notes.",
     "- If search candidates are absent and searchNeed is skip, you may return PASS/REVISION with a safe title and writer brief.",
     "- Separate confirmed facts from interpretation.",
-    "- For policy, support programs, law, tax, recruitment, prices, schedules, application conditions, official announcements, or reader-risk topics, require official or reliable sources.",
-    "- Return BLOCK when facts are insufficient, sources conflict, the direct topic cannot be preserved, or a publishable title cannot be supported.",
+    "- For policy, support programs, law, tax, recruitment, prices, schedules, application conditions, official announcements, or reader-risk topics, avoid definitive claims when official sources are absent; do not block if the task can be written as web/blog trend aggregation.",
+    "- Return BLOCK only when no directly related candidates exist, sources conflict beyond cautious writing, the direct topic cannot be preserved, or a publishable title cannot be supported.",
     "- Do not copy source titles. Extract search flow, reader interest, repeated angles, and gaps.",
     "- Include writerContract as the compact Writer handoff. It must define the reader-facing article mission, selected title, topic thesis, reader promise, first section focus, required answers, coverage boundaries, confirmed facts, uncertainty, source boundaries, current bridge requirements, and must-not-do items.",
     "- writerContract must not narrate the search process, source collection process, or verification workflow. Put process detail in searchFlowSummary or notes, not in the Writer handoff.",
@@ -889,6 +929,7 @@ function buildResearchTitlePrompt({
     "- Write a UTF-8 JSON file at the exact Output JSON path.",
     "- JSON shape: { \"status\": \"PASS\" | \"REVISION\" | \"BLOCK\", \"failureReason\": string, \"finalTitle\": string, \"topicThesis\": string, \"topicLane\": string, \"selectedKeywordIndexes\": number[], \"selectedKeywordPhrases\": string[], \"searchQueries\": string[], \"anchorEvent\": {\"name\": string, \"date\": string, \"summary\": string}, \"currentPeg\": {\"date\": string, \"summary\": string, \"sourceIds\": string[]}, \"currentBridgeRequired\": boolean, \"currentBridgeSatisfied\": boolean, \"directTopicPreserved\": boolean, \"factBased\": boolean, \"searchNeed\": \"skip\" | \"light\" | \"normal\" | \"strict\", \"searchFlowSummary\": string, \"repeatedTopics\": string[], \"competitionGaps\": string[], \"coreQuestions\": string[], \"mustCover\": string[], \"avoidDirections\": string[], \"confirmedFacts\": string[], \"uncertainItems\": string[], \"usableSources\": [{\"sourceId\": string, \"title\": string, \"url\": string, \"reason\": string}], \"titleCandidates\": [{\"title\": string, \"reason\": string, \"risk\": string}], \"writerBrief\": string, \"writerContract\": { \"articleMission\": string, \"selectedTitle\": string, \"topicThesis\": string, \"targetReader\": string, \"readerPromise\": string, \"firstSectionFocus\": string, \"mustAnswer\": string[], \"mustCover\": string[], \"mustNotDo\": string[], \"confirmedFacts\": string[], \"uncertainItems\": string[], \"sourceBoundaries\": string[], \"recommendedStructure\": string[], \"currentBridgeRequired\": boolean, \"currentBridgeSatisfied\": boolean, \"anchorEvent\": object, \"currentPeg\": object, \"tone\": string }, \"notes\": string[] }.",
     "- topicLane, selectedKeywordIndexes, selectedKeywordPhrases, and searchQueries are required in auto topic mode. searchQueries must be narrow and must not contain the full Category keyword pool.",
+    usesArticlePromptMode ? "- In article prompt mode, directTopicPreserved means the short-content input keyword was preserved as the article seed and search basis; finalTitle should be your chosen hook title, not the exact input keyword." : "",
     "- anchorEvent/currentPeg/currentBridgeRequired/currentBridgeSatisfied are required. Use empty strings/arrays only when no older anchorEvent exists and explain that in notes.",
     "- If status is BLOCK, keep finalTitle empty unless a safe non-publishable working title is useful, and explain failureReason concisely in Korean.",
     "- If status is PASS or REVISION, finalTitle must be a Korean Naver Blog title that is click-worthy without exaggeration.",
@@ -948,12 +989,12 @@ function buildMainReviewPrompt({
     "- Review the Research/Title Agent result, Writer Agent result, selected title, article body, tags, image directions/notes, facts, uncertainty, source use, and risk expressions together.",
     "- Do not trust Writer status by itself. Independently judge whether the output followed the harness principles.",
     "- Use the Writer Contract as the shared writing/review contract. Check articleMission, selectedTitle, topicThesis, readerPromise, firstSectionFocus, mustAnswer, mustCover, and mustNotDo.",
-    "- Also check currentBridgeRequired, currentBridgeSatisfied, anchorEvent, and currentPeg from the Writer Contract. A current-issue article based only on an older anchorEvent must not pass.",
+    "- Also check currentBridgeRequired, currentBridgeSatisfied, anchorEvent, and currentPeg from the Writer Contract. For this app, directly related blog/web candidates may support a current web-discussion article when official confirmation is absent.",
     "- Return REVISION if the body follows search/source/research-process flow instead of fulfilling the Writer Contract, even when the facts are technically true.",
     "",
     "Title review:",
     "- The final title must match the category and the Research/Title Agent finalTitle.",
-    "- If topicMode is manual and a user direct topic exists, the final title and body must preserve that topic. Category or keyword must not replace it.",
+    "- If a user direct topic exists, the final title and body must preserve that topic regardless of Topic mode. Category or keyword must not replace it.",
     "- The title must include the core keyword naturally, have Naver-home clickability, avoid clickbait, and be answerable by the body.",
     "- Naver-home title review expects an editorial homepage-card title tied to the specific subject, event/action/tension, and reader promise. It must not pass only because it has a generic hook phrase.",
     "- Date words in the title must be source-backed story material, not decoration from Current writing date. Explicit Preferred tone wins style conflicts unless it creates clickbait, unsupported claims, or a title/body mismatch.",
@@ -962,14 +1003,14 @@ function buildMainReviewPrompt({
     "Factuality review:",
     "- For fact-based topics, only confirmed facts from the Research/Title handoff and usable sources may be used.",
     "- Conditions, dates, amounts, targets, application methods, prices, schedules, official claims, statistics, and policy details must not be invented.",
-    "- If a confirmation 기준일/current 기준 is needed for 접수중, 모집중, 신청 가능, 현재 운영, current availability, prices, schedules, deadlines, policy/support conditions, or official announcements but absent or misused, do not PASS.",
-    "- If currentBridgeRequired is true, PASS only when currentBridgeSatisfied is true and the body explains the currentPeg as the reason the older anchorEvent matters now. If the article only retells the anchorEvent, return BLOCK or REVISION.",
+    "- If a confirmation 기준일/current 기준 is needed for 접수중, 모집중, 신청 가능, 현재 운영, current availability, prices, schedules, deadlines, policy/support conditions, or official announcements but absent, require cautious wording instead of definitive claims.",
+    "- If currentBridgeRequired is true, PASS when the body explains either the currentPeg or the current web/blog discussion as the reason the older anchorEvent matters now. If the article only retells the anchorEvent, return BLOCK or REVISION.",
     "- Facts and interpretation must be distinguishable. Uncertain items must not become definite claims.",
     "",
     "Search/source-use review:",
     "- The article must not copy search-result sentences, Naver top-post structure, source titles, or source paragraph order.",
     "- Search results may be used as signals, facts, reader-interest clues, and gap analysis only. They must not be pasted together into a new article.",
-    "- If official or reliable sources are required but missing, return BLOCK.",
+    "- Do not return BLOCK solely because official sources are missing when directly related blog/web candidates exist and the article uses cautious aggregation wording.",
     "",
     "Body quality review:",
     "- The introduction must be natural, the flow must be readable, and the article must not be a mechanical list.",
@@ -985,12 +1026,12 @@ function buildMainReviewPrompt({
     "",
     "Risk expression review:",
     "- Reject exaggerated income claims, fear-driven claims, unsupported future certainty, and expressions like 100%, 무조건, 완전 자동, 곧 사라진다, 충격, 대박 when used as unsupported hooks.",
-    "- Reader-risk information must be blocked when uncertain, especially policy, support programs, law, tax, jobs, money, prices, schedules, applications, and official announcements.",
+    "- Reader-risk information must avoid definitive advice when uncertain, especially policy, support programs, law, tax, jobs, money, prices, schedules, applications, and official announcements.",
     "",
     "Final verdict rules:",
     "- Return PASS only if every review area can be published as-is.",
     "- Return REVISION if the issue is fixable by rewriting without new research, but do not rewrite it here.",
-    "- Return BLOCK if facts are insufficient, sources conflict, official/current evidence is missing, the article is unsupported, the direct topic changed, or publishing could mislead readers.",
+    "- Return BLOCK if directly related candidates are absent, sources conflict beyond cautious aggregation, the article is unsupported, the direct topic changed, or publishing could mislead readers.",
     "",
     "Research/Title Agent result:",
     JSON.stringify(researchTitleResult || {}, null, 2),
@@ -1198,7 +1239,7 @@ function firstCompactText(values, fallback = "") {
 function codexTaskTimeoutMs(agent = "") {
   const raw = Number(process.env.BLOGAUTO_CODEX_TASK_TIMEOUT_MS || 0);
   if (Number.isFinite(raw) && raw >= 30000) return raw;
-  if (agent === "research") return 120000;
+  if (agent === "research") return 180000;
   if (agent === "image" || agent === "imageStyle") return 300000;
   return 180000;
 }
@@ -1380,6 +1421,7 @@ function researchRevisionReason(researchResult) {
 function currentBridgeIssueReason(researchResult) {
   if (researchResult?.currentBridgeRequired !== true) return "";
   if (researchResult?.currentBridgeSatisfied === true) return "";
+  if (Array.isArray(researchResult?.usableSources) && researchResult.usableSources.length > 0) return "";
   return summarizeAgentReason([
     researchResult?.failureReason,
     researchResult?.currentPeg?.summary,
@@ -1393,6 +1435,7 @@ function isResearchSourceFailure(researchResult) {
   if (!["light", "normal", "strict"].includes(searchNeed)) return false;
 
   const status = String(researchResult?.status || "").toUpperCase();
+  if (Array.isArray(researchResult?.usableSources) && researchResult.usableSources.length > 0) return false;
   const text = compactTextList([
     researchResult?.failureReason,
     researchResult?.searchFlowSummary,
@@ -1652,6 +1695,8 @@ async function runCodexTask({
   };
 
   const executeCodex = () => new Promise((resolve, reject) => {
+    const resultPath = path.join(options.jobDir, resultFileName);
+    const timeoutResultGraceMs = 15000;
     const child = spawn(options.codexCmdPath, [
       "exec",
       "--json",
@@ -1666,19 +1711,34 @@ async function runCodexTask({
     });
 
     let settled = false;
+    let waitingForTimedOutResult = false;
+    let timeoutResultGrace = null;
     const timeoutMs = codexTaskTimeoutMs(agent);
     const startedAt = Date.now();
     const settle = (error) => {
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
+      clearTimeout(timeoutResultGrace);
       if (error) reject(error);
       else resolve();
     };
     const timeout = setTimeout(() => {
       const elapsedSeconds = Math.round((Date.now() - startedAt) / 1000);
+      const timeoutError = new Error(`${agentDisplayName(agent)}가 ${elapsedSeconds}초 동안 결과 파일을 만들지 않아 중단했습니다. 다시 시도하거나 모델 effort를 낮춰주세요.`);
+      if (fs.existsSync(resultPath)) {
+        settle();
+        return;
+      }
+      waitingForTimedOutResult = true;
       child.kill();
-      settle(new Error(`${agentDisplayName(agent)}가 ${elapsedSeconds}초 동안 결과 파일을 만들지 않아 중단했습니다. 다시 시도하거나 모델 effort를 낮춰주세요.`));
+      timeoutResultGrace = setTimeout(() => {
+        if (fs.existsSync(resultPath)) {
+          settle();
+          return;
+        }
+        settle(timeoutError);
+      }, timeoutResultGraceMs);
     }, timeoutMs);
 
     const streamBuffers = { info: "", warn: "" };
@@ -1725,6 +1785,7 @@ async function runCodexTask({
     child.on("error", (error) => settle(new Error(`codex.cmd 실행 실패: ${error.message}`)));
     child.on("close", (code) => {
       flushStreamBuffers();
+      if (waitingForTimedOutResult) return;
       if (code === 0) settle();
       else settle(new Error(`codex.cmd가 종료 코드 ${code}로 실패했습니다.`));
     });
@@ -2006,9 +2067,22 @@ async function runCodexGeneration(options, log = () => {}) {
 
   let researchStatus = String(researchResult.status || "").toUpperCase();
   let requestedSearchNeed = String(researchResult.searchNeed || "").toLowerCase();
+  const articlePromptModeSkipsSearch = hasArticlePromptMode(effectiveOptions.articlePromptFilePath);
+  if (articlePromptModeSkipsSearch && ["light", "normal", "strict"].includes(requestedSearchNeed)) {
+    log("Article prompt mode: app search candidate collection skipped.", "info", "research");
+    requestedSearchNeed = "skip";
+    researchResult = {
+      ...researchResult,
+      searchNeed: "skip",
+      notes: compactTextList([
+        researchResult?.notes,
+        "Article prompt mode skipped app-provided search candidates."
+      ])
+    };
+  }
   const validSearchNeeds = new Set(["skip", "light", "normal", "strict"]);
   let needsSearch = ["light", "normal", "strict"].includes(requestedSearchNeed);
-  const maxResearchSearchRounds = 2;
+  const maxResearchSearchRounds = 1;
   let researchSearchRound = 0;
   while (
     needsSearch
@@ -2151,7 +2225,13 @@ async function runCodexGeneration(options, log = () => {}) {
     };
   }
 
-  if (researchStatus === "REVISION") {
+  if (
+    researchStatus === "REVISION"
+    && !(
+      effectiveOptions.searchResults.length > 0
+      && String(researchResult.finalTitle || "").trim()
+    )
+  ) {
     const researchReason = researchRevisionReason(researchResult);
     log(`Research/Title Agent가 본문 작성 가능 상태가 아닙니다: ${researchReason}`, "warn", "research");
     return {
@@ -2203,7 +2283,8 @@ async function runCodexGeneration(options, log = () => {}) {
       tokenUsage: tokenUsageSnapshot()
     };
   }
-  const maxReviewAttempts = String(effectiveOptions.topicMode || "").toLowerCase() === "auto" ? 3 : 1;
+  const articlePromptMode = hasArticlePromptMode(effectiveOptions.articlePromptFilePath);
+  const maxReviewAttempts = 1;
   let writerResult = null;
   let mainReviewResult = null;
   let mainReviewStatus = "";
@@ -2215,7 +2296,7 @@ async function runCodexGeneration(options, log = () => {}) {
       options: effectiveOptions,
       prompt: buildPrompt({
         ...effectiveOptions,
-        topic: finalTitle || options.topic,
+        topic: articlePromptMode ? options.topic : (finalTitle || options.topic),
         researchTitleResult: researchResult,
         writerRevisionFeedback,
         writerAttempt: attempt,

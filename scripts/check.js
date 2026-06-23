@@ -826,17 +826,17 @@ if (
     || !researchTitlePrompt.content.includes("currentPeg")
     || !researchTitlePrompt.content.includes("currentBridgeRequired")
     || !researchTitlePrompt.content.includes("currentBridgeSatisfied")
-    || !researchTitlePrompt.content.includes("make searchQueries seek the currentPeg rather than repeating only the old event"))
+    || !researchTitlePrompt.content.includes("current web discussion"))
 ) {
   failed = true;
-  console.error("src/lib/codexRunner.js: Research/Title Agent must distinguish older anchor events from source-backed current pegs");
+  console.error("src/lib/codexRunner.js: Research/Title Agent must distinguish older anchor events from current web/blog discussion");
 }
 if (
   !sourceFiles.codexRunner.content.includes("function currentBridgeIssueReason")
   || !sourceFiles.codexRunner.content.includes("currentBridgeIssueReason(researchResult)")
 ) {
   failed = true;
-  console.error("src/lib/codexRunner.js: stale current-issue topics must fail when currentBridgeRequired is true but unsatisfied");
+  console.error("src/lib/codexRunner.js: current bridge handling must be explicit for current-issue topics");
 }
 if (
   !sourceFiles.codexRunner.content.includes("currentBridgeRequired,")

@@ -3,7 +3,7 @@ const https = require("node:https");
 
 const MAX_RESPONSE_CHARS = 1_500_000;
 const MAX_EXCERPT_CHARS = 1400;
-const MAX_SELECTED_CONTENT_RESULTS = 20;
+const MAX_SELECTED_CONTENT_RESULTS = 7;
 const MAX_SEARCH_QUERY_VARIANTS = 4;
 const CONTENT_FETCH_CONCURRENCY = 4;
 const CANDIDATE_FETCH_TIMEOUT_MS = 20000;
@@ -686,7 +686,7 @@ async function collectSearchResults(options, log = () => {}) {
     })
     .filter((item) => !isLowValueResult(item.title, item.url))
     .filter((item) => candidateMatchesSearchIntent(item, options))
-    .slice(0, 20);
+    .slice(0, MAX_SELECTED_CONTENT_RESULTS);
 
   if (!candidates.length) return [];
 
@@ -736,7 +736,7 @@ async function collectSearchResults(options, log = () => {}) {
         seen.add(key);
         candidates.push(item);
       }
-      candidates = candidates.slice(0, 20);
+      candidates = candidates.slice(0, MAX_SELECTED_CONTENT_RESULTS);
       ({ selected, withContent } = await enrichAndScore(candidates));
     }
   }
@@ -797,9 +797,9 @@ function summarizeSourceQuality(searchResults, _topicMode = "manual", options = 
   const strictEvidence = String(options.searchNeed || "").toLowerCase() === "strict"
     && results.some((item) => item?.relevance?.strictEvidence === true);
   const usableRelevant = usable.filter(hasDirectRelevance);
-  const status = strictEvidence
-    ? strongEvidence.length ? "usable" : "insufficient"
-    : usableRelevant.length ? "usable" : "insufficient";
+  const status = usableRelevant.length || directlyRelevant.length
+    ? "usable"
+    : "insufficient";
   return {
     status,
     totalCandidates: results.length,
@@ -809,12 +809,8 @@ function summarizeSourceQuality(searchResults, _topicMode = "manual", options = 
     topicMatchedCandidates: topicMatched.length,
     strongEvidenceCandidates: strongEvidence.length,
     reason: status === "usable"
-      ? strictEvidence
-        ? "검색 후보에서 현재성/신뢰 근거와 주제 직접성이 함께 확인되었습니다."
-        : "검색 후보에서 주제와 직접 관련된 본문 발췌가 확보되었습니다."
-      : strictEvidence
-        ? "신뢰 가능한 현재성 근거와 주제 직접성이 함께 확인되는 검색 후보가 부족합니다."
-        : "검색 후보에서 주제와 직접 관련된 본문 발췌가 부족합니다. 주제/키워드 오타 또는 검색 결과 불일치 가능성이 있습니다."
+      ? "검색 후보에서 주제와 직접 관련된 글/본문 발췌가 확보되었습니다."
+      : "검색 후보에서 주제와 직접 관련된 글/본문 발췌가 부족합니다. 주제/키워드 오타 또는 검색 결과 불일치 가능성이 있습니다."
   };
 }
 

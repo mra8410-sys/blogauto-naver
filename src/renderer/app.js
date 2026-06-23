@@ -19,6 +19,7 @@ const state = {
   selectedShortContentCategory: "",
   shortContentTitles: [],
   selectedShortContentTitles: [],
+  currentArticleTitle: "",
   articlePromptFilePath: "",
   imagePromptFilePath: ""
 };
@@ -28,10 +29,10 @@ const DEFAULT_NAVER_SEARCH_URL = "https://search.naver.com/search.naver?ssc=tab.
 const DEFAULT_GOOGLE_SEARCH_URL = "https://www.google.com/search?q={query}&num=20&hl=ko";
 const STARTUP_NOTICE_KEY = "blogauto.startupNotice.dismissed.v2";
 const DEFAULT_AGENT_MODELS = {
-  main: "high",
-  research: "high",
-  writer: "high",
-  image: "medium"
+  main: "low",
+  research: "medium",
+  writer: "medium",
+  image: "low"
 };
 const AGENT_MODEL_SELECTORS = {
   main: "#mainAgentModel",
@@ -466,6 +467,32 @@ function escapeHtml(value) {
     .replace(/'/g, "&#39;");
 }
 
+function setSelectedTitleText(value) {
+  state.currentArticleTitle = String(value || "");
+  const selectedTitle = $("#selectedTitle");
+  if (selectedTitle) selectedTitle.textContent = value;
+  renderSelectedTitleList();
+}
+
+function renderSelectedTitleList() {
+  const list = $("#selectedTitleList");
+  const count = $("#selectedTitleCount");
+  if (!list) return;
+  const titles = state.selectedShortContentTitles
+    .map((title) => String(title || "").trim())
+    .filter(Boolean);
+  if (count) count.textContent = `${titles.length}개`;
+  if (!titles.length) {
+    list.innerHTML = "<span class=\"hint\">아직 선택된 제목이 없습니다.</span>";
+    return;
+  }
+  list.innerHTML = titles
+    .map((title, index) => (
+      `<div class="selected-title-pill" title="${escapeHtml(title)}"><span>${index + 1}</span><strong>${escapeHtml(title)}</strong></div>`
+    ))
+    .join("");
+}
+
 function renderImages(images) {
   const grid = $("#imageGrid");
   grid.innerHTML = "";
@@ -648,10 +675,15 @@ function selectAccount(accountId) {
   const account = state.accountStore.accounts.find((item) => item.id === accountId);
   if (!account) return;
   state.accountStore.selectedAccountId = account.id;
+  account.shortContentSelectedTitles = [];
+  state.selectedShortContentTitles = [];
   fillAccountForm(account);
   clearCategoryForm();
   renderAccounts();
   syncShortContentsFromAccount(account);
+  refreshShortContentsForCurrentAccount({ quiet: true }).catch((error) => {
+    addLog({ level: "error", message: `숏텐츠 제목 자동 갱신 실패: ${error.message}`, at: new Date().toISOString() });
+  });
   saveAccountStoreNow();
 }
 
@@ -707,7 +739,7 @@ function setCategoryButtonLabel() {
 
 function fillCategoryForm(category = null) {
   $("#categoryName").value = category?.name || "";
-  $("#categoryKeyword").value = category?.keyword || category?.name || "";
+  $("#categoryKeyword").value = "";
   $("#categoryExcludedTopics").value = "";
   $("#categoryPublishPurpose").value = "";
   $("#categoryPreferredTone").value = "";
@@ -804,16 +836,49 @@ function normalizeShortContentTitleCache(titles = []) {
     .filter((item) => item.title);
 }
 
+function normalizeArticleLengthValue(value) {
+  const length = Number(value || 1500);
+  return [1200, 1500, 2000].includes(length) ? length : 1500;
+}
+
+function normalizeTopicModeValue(value) {
+  return String(value || "manual") === "auto" ? "auto" : "manual";
+}
+
+function shortContentSettingsFromAccount(account = selectedAccount()) {
+  return {
+    writingTone: String(account?.shortContentWritingTone || ""),
+    articleLength: normalizeArticleLengthValue(account?.shortContentArticleLength),
+    topicMode: normalizeTopicModeValue(account?.shortContentTopicMode),
+    articlePromptFilePath: String(account?.shortContentArticlePromptFilePath || ""),
+    imagePromptFilePath: String(account?.shortContentImagePromptFilePath || "")
+  };
+}
+
+function clearStoredShortContentSelections(accounts = []) {
+  for (const account of Array.isArray(accounts) ? accounts : []) {
+    account.shortContentSelectedTitles = [];
+  }
+}
+
 function syncShortContentsFromAccount(account = selectedAccount()) {
   const activeAccount = account || null;
+  const shortSettings = shortContentSettingsFromAccount(activeAccount);
   state.selectedShortContentCategory = String(activeAccount?.shortContentCategory || "");
   state.selectedShortContentTitles = Array.isArray(activeAccount?.shortContentSelectedTitles)
     ? activeAccount.shortContentSelectedTitles.map((title) => String(title || "").trim()).filter(Boolean)
     : [];
   state.shortContentTitles = normalizeShortContentTitleCache(activeAccount?.shortContentTitleCache || []);
+  state.articlePromptFilePath = shortSettings.articlePromptFilePath;
+  state.imagePromptFilePath = shortSettings.imagePromptFilePath;
+  if ($("#writingTone")) $("#writingTone").value = shortSettings.writingTone;
+  if ($("#articleLength")) $("#articleLength").value = String(shortSettings.articleLength);
+  if ($("#topicMode")) $("#topicMode").value = shortSettings.topicMode;
+  renderPromptFileLabels();
+  updateModeControls();
   renderShortContentCategories(state.shortContentCategories);
   renderShortContentTitles(state.shortContentTitles, state.selectedShortContentCategory);
-  $("#selectedTitle").textContent = state.selectedShortContentTitles[0] || "아직 선정 전";
+  setSelectedTitleText(state.selectedShortContentTitles[0] || "아직 선정 전");
 }
 
 function persistShortContentsToAccount() {
@@ -822,6 +887,11 @@ function persistShortContentsToAccount() {
   account.shortContentCategory = state.selectedShortContentCategory;
   account.shortContentSelectedTitles = [...state.selectedShortContentTitles];
   account.shortContentTitleCache = normalizeShortContentTitleCache(state.shortContentTitles);
+  account.shortContentWritingTone = $("#writingTone")?.value.trim() || "";
+  account.shortContentArticleLength = normalizeArticleLengthValue($("#articleLength")?.value || 1500);
+  account.shortContentTopicMode = normalizeTopicModeValue($("#topicMode")?.value || "manual");
+  account.shortContentArticlePromptFilePath = state.articlePromptFilePath;
+  account.shortContentImagePromptFilePath = state.imagePromptFilePath;
   return account;
 }
 
@@ -890,7 +960,8 @@ function renderPromptFileLabels() {
   }
 }
 
-async function loadShortContentCategories() {
+async function loadShortContentCategories(options = {}) {
+  const quiet = options.quiet === true;
   const button = $("#loadShortContentsButton");
   if (!selectedAccount()) {
     addLog({ level: "warn", message: "숏텐츠 카테고리를 불러오려면 계정을 먼저 선택하세요.", at: new Date().toISOString() });
@@ -913,25 +984,40 @@ async function loadShortContentCategories() {
   }
 }
 
-async function loadShortContentTitles(categoryName) {
+async function loadShortContentTitles(categoryName, options = {}) {
   const category = String(categoryName || "").trim();
+  const preserveSelected = options.preserveSelected === true;
   if (!category) return;
   if (!selectedAccount()) {
     addLog({ level: "warn", message: "숏텐츠 제목을 관리할 계정을 먼저 선택하세요.", at: new Date().toISOString() });
     return;
   }
   state.selectedShortContentCategory = category;
-  state.selectedShortContentTitles = [];
+  if (!preserveSelected) {
+    state.selectedShortContentTitles = [];
+  }
   renderShortContentCategories(state.shortContentCategories);
   const result = await window.blogAuto.loadShortContentTitles(category);
   state.shortContentTitles = Array.isArray(result?.titles) ? result.titles : [];
   persistShortContentsToAccount();
   await saveAccountStoreNow();
   renderShortContentTitles(state.shortContentTitles, category);
+  renderSelectedTitleList();
   addLog({
     level: "info",
     message: `숏텐츠 ${category} 제목 ${state.shortContentTitles.length}개를 불러왔습니다.`,
     at: new Date().toISOString()
+  });
+}
+
+async function refreshShortContentsForCurrentAccount(options = {}) {
+  if (!selectedAccount()) return;
+  await loadShortContentCategories(options);
+  const category = String(state.selectedShortContentCategory || selectedAccount()?.shortContentCategory || "").trim();
+  if (!category) return;
+  await loadShortContentTitles(category, {
+    ...options,
+    preserveSelected: true
   });
 }
 
@@ -941,7 +1027,11 @@ function collectForm(target = {}) {
     || (account?.categories || []).find((item) => item.checked !== false && hasCategoryName(item))
     || (account?.categories || []).find((item) => item.checked !== false);
   const useSelectedAccount = Boolean(target.account || account);
-  const publishMode = $("#topicMode").value;
+  const accountShortSettings = shortContentSettingsFromAccount(account);
+  const usesTargetAccountSettings = Boolean(target.account);
+  const publishMode = usesTargetAccountSettings
+    ? accountShortSettings.topicMode
+    : normalizeTopicModeValue($("#topicMode").value);
   const accountSelectedTitles = Array.isArray(account?.shortContentSelectedTitles)
     ? account.shortContentSelectedTitles.map((title) => String(title || "").trim()).filter(Boolean)
     : [];
@@ -955,16 +1045,16 @@ function collectForm(target = {}) {
     naverPassword: useSelectedAccount ? (account?.naverPassword || "") : $("#naverPassword").value,
     topicMode: publishMode,
     repeatTermMinutes: Number($("#repeatTermMinutes").value || 60),
-    topic: ($("#topic").value.trim() || selectedTitle || category?.name || "").trim(),
+    topic: selectedTitle,
     category: category?.name || "",
-    keyword: category?.keyword || category?.name || "",
+    keyword: "",
     excludedTopics: "",
     publishPurpose: "",
-    preferredTone: $("#writingTone")?.value.trim() || category?.preferredTone || "",
-    writingTone: $("#writingTone")?.value.trim() || "",
-    articleLength: Number($("#articleLength")?.value || 1500),
-    articlePromptFilePath: state.articlePromptFilePath,
-    imagePromptFilePath: state.imagePromptFilePath,
+    preferredTone: (usesTargetAccountSettings ? accountShortSettings.writingTone : ($("#writingTone")?.value.trim() || "")) || category?.preferredTone || "",
+    writingTone: usesTargetAccountSettings ? accountShortSettings.writingTone : ($("#writingTone")?.value.trim() || ""),
+    articleLength: usesTargetAccountSettings ? accountShortSettings.articleLength : normalizeArticleLengthValue($("#articleLength")?.value || 1500),
+    articlePromptFilePath: usesTargetAccountSettings ? accountShortSettings.articlePromptFilePath : state.articlePromptFilePath,
+    imagePromptFilePath: usesTargetAccountSettings ? accountShortSettings.imagePromptFilePath : state.imagePromptFilePath,
     freshnessLevel: "high",
     searchChannel: ["blog", "web"].includes(category?.searchChannel) ? category.searchChannel : "blog",
     trustBlogAsSource: category?.trustBlogAsSource === true,
@@ -974,7 +1064,7 @@ function collectForm(target = {}) {
     naverSearchUrl: DEFAULT_NAVER_SEARCH_URL,
     googleSearchUrl: DEFAULT_GOOGLE_SEARCH_URL,
     naverEditorDomNotes: "",
-    publishAfterGenerate: publishMode === "auto",
+    publishAfterGenerate: true,
     publishVisibility: $("#publishVisibility").value,
     publishPrivate: $("#publishVisibility").value !== "public",
     publishScheduleMode: $("#publishScheduleMode").value,
@@ -990,7 +1080,6 @@ function collectForm(target = {}) {
 
 function applySettings(settings) {
   const map = {
-    topic: "#topic",
     topicMode: "#topicMode",
     repeatTermMinutes: "#repeatTermMinutes",
     publishVisibility: "#publishVisibility",
@@ -1005,7 +1094,7 @@ function applySettings(settings) {
       $(selector).value = settings[key];
     }
   }
-  $("#publishAfterGenerate").checked = settings.publishAfterGenerate === true;
+  $("#publishAfterGenerate").checked = true;
   $("#includeTitleImage").checked = settings.includeTitleImage !== false;
   $("#imageAspectRatio").value = normalizeImageAspectRatio(settings.imageAspectRatio);
   $("#breakSentencesInBody").checked = settings.breakSentencesInBody !== false;
@@ -1019,12 +1108,13 @@ function applySettings(settings) {
 
 async function saveSettingsNow() {
   $("#settingsState").textContent = "설정 저장 중";
+  persistShortContentsToAccount();
   const form = collectForm();
   await window.blogAuto.saveSettings({
     naverId: form.naverId,
     blogId: form.blogId,
     naverPassword: form.naverPassword,
-    topic: form.topic,
+    topic: "",
     keyword: form.keyword,
     category: form.category,
     primarySearchProvider: form.primarySearchProvider,
@@ -1070,8 +1160,8 @@ function updateModeControls() {
   $("#repeatTermLabel").style.display = isAuto ? "grid" : "none";
   $("#publishOptionsRow").style.display = isAuto ? "flex" : "none";
   $("#manualTopicLabel").style.display = "none";
-  $("#publishAfterGenerate").checked = isAuto;
-  $("#publishAfterGenerate").disabled = isAuto;
+  $("#publishAfterGenerate").checked = true;
+  $("#publishAfterGenerate").disabled = true;
   if (isAuto) {
     $("#publishVisibility").value = "public";
     $("#publishScheduleMode").value = "now";
@@ -1086,6 +1176,9 @@ function updateModeControls() {
 function getAutoTargets() {
   const targets = [];
   for (const account of state.accountStore.accounts.filter((item) => item.checked !== false)) {
+    const hasSelectedShortTitle = Array.isArray(account.shortContentSelectedTitles)
+      && account.shortContentSelectedTitles.some((title) => String(title || "").trim());
+    if (!hasSelectedShortTitle) continue;
     for (const category of (account.categories || []).filter((item) => item.checked !== false && hasCategoryName(item))) {
       targets.push({ account, category });
     }
@@ -1189,6 +1282,13 @@ async function startAutoPublishing(startTargetKey = "") {
   if (!checkedTargetsWithCategory.length) {
     throw new Error("자동 발행하려면 체크된 카테고리의 블로그 카테고리명을 먼저 등록하세요.");
   }
+  const checkedTargetsWithShortTitles = checkedTargetsWithCategory.filter((target) => (
+    Array.isArray(target.account?.shortContentSelectedTitles)
+      && target.account.shortContentSelectedTitles.some((title) => String(title || "").trim())
+  ));
+  if (!checkedTargetsWithShortTitles.length) {
+    throw new Error("자동 발행하려면 계정별 숏텐츠 제목을 먼저 선택하세요.");
+  }
   state.running = true;
   state.autoRunning = true;
   state.autoPausedForSession = false;
@@ -1248,7 +1348,7 @@ async function startAutoPublishing(startTargetKey = "") {
         message: `자동 Cycle 시작 (${attempt}/${autoAttemptLimit}): ${target.account.label || target.account.naverId} / ${target.category.name}`,
         at: new Date().toISOString()
       });
-      $("#selectedTitle").textContent = "아직 선정 전";
+      setSelectedTitleText("아직 선정 전");
       $("#articlePreview").value = "";
       renderImages([]);
       renderImageNotes([]);
@@ -1332,15 +1432,17 @@ async function startAutoPublishing(startTargetKey = "") {
 }
 
 async function startManualJob() {
+  persistShortContentsToAccount();
   const form = collectForm();
   if (!form.category) throw new Error("선택 계정에서 카테고리를 체크하세요.");
+  if (!form.topic) throw new Error("글을 작성할 숏텐츠 제목을 먼저 선택하세요.");
   if (form.publishAfterGenerate && !form.naverId) throw new Error("발행까지 진행하려면 작업할 계정을 선택하거나 등록하세요.");
   state.running = true;
   $("#startButton").disabled = true;
   await saveSettingsNow();
   setTokenTotal(0);
   $("#articlePreview").value = "";
-  $("#selectedTitle").textContent = "아직 선정 전";
+  setSelectedTitleText("아직 선정 전");
   renderImages([]);
   renderImageNotes([]);
   setRunState("generating", "생성 준비");
@@ -1359,6 +1461,12 @@ async function boot() {
   $("#runtimePath").textContent = initial.runtimeRoot;
   state.chrome = initial.chrome || state.chrome;
   state.accountStore = initial.accountStore || state.accountStore;
+  clearStoredShortContentSelections(state.accountStore.accounts);
+  try {
+    state.accountStore = await window.blogAuto.saveAccountStore(state.accountStore);
+  } catch (error) {
+    addLog({ level: "error", message: `숏텐츠 선택 초기화 저장 실패: ${error.message}`, at: new Date().toISOString() });
+  }
   applySettings(initial.settings || {});
   setCodexRateLimits(initial.settings?.codexRateLimits || null);
   refreshCodexUsageOnStartup();
@@ -1386,14 +1494,14 @@ async function boot() {
   window.blogAuto.onPreview((payload) => {
     $("#articlePreview").value = payload.article || "";
     $("#articleMeta").textContent = payload.title || "본문 생성 완료";
-    if (payload.title) $("#selectedTitle").textContent = payload.title;
+    if (payload.title) setSelectedTitleText(payload.title);
     if (payload.tokenUsage) setTokenTotal(payload.tokenUsage.total || 0);
     if (payload.tokenUsage?.rateLimits) setCodexRateLimits(payload.tokenUsage.rateLimits);
     renderImages(payload.images || []);
     renderImageNotes(payload.imageNotes || []);
   });
   window.blogAuto.onSelectedTitle((payload) => {
-    $("#selectedTitle").textContent = payload.title || "제목 선정 보류";
+    if (payload.title) setSelectedTitleText(payload.title);
     $("#articleMeta").textContent = payload.verdict || payload.status || "제목 선정 완료";
   });
   window.blogAuto.onComplete((payload) => {
@@ -1404,7 +1512,7 @@ async function boot() {
     setRunState(payload.status, payload.status);
     $("#articlePreview").value = payload.article || $("#articlePreview").value;
     $("#articleMeta").textContent = payload.title || payload.status || "완료";
-    if (payload.title) $("#selectedTitle").textContent = payload.title;
+    if (payload.title) setSelectedTitleText(payload.title);
     if (payload.tokenUsage) setTokenTotal(payload.tokenUsage.total || 0);
     if (payload.tokenUsage?.rateLimits) setCodexRateLimits(payload.tokenUsage.rateLimits);
     renderImages(payload.images || []);
@@ -1455,7 +1563,7 @@ async function boot() {
     }
     persistShortContentsToAccount();
     renderShortContentTitles(state.shortContentTitles, state.selectedShortContentCategory);
-    $("#selectedTitle").textContent = state.selectedShortContentTitles[0] || "아직 선정 전";
+    setSelectedTitleText(state.selectedShortContentTitles[0] || "아직 선정 전");
     saveAccountStoreNow().catch((error) => {
       addLog({ level: "error", message: `숏텐츠 선택 저장 실패: ${error.message}`, at: new Date().toISOString() });
     });
@@ -1513,7 +1621,15 @@ async function boot() {
       checked: true,
       sessionStatus: "unknown",
       sessionCheckedAt: "",
-      categories: []
+      categories: [],
+      shortContentCategory: "",
+      shortContentSelectedTitles: [],
+      shortContentTitleCache: [],
+      shortContentWritingTone: "",
+      shortContentArticleLength: 1500,
+      shortContentTopicMode: "manual",
+      shortContentArticlePromptFilePath: "",
+      shortContentImagePromptFilePath: ""
     };
     state.accountStore.accounts.push(account);
     state.accountStore.selectedAccountId = account.id;
@@ -1592,7 +1708,7 @@ async function boot() {
   $("#addCategoryButton").addEventListener("click", async () => {
     const account = selectedAccount();
     const name = $("#categoryName").value.trim();
-    const keyword = name;
+    const keyword = "";
     const excludedTopics = "";
     const publishPurpose = "";
     const preferredTone = "";

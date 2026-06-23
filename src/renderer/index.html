@@ -278,9 +278,18 @@
             <h2>생성된 본문</h2>
             <span id="articleMeta" class="hint">아직 생성 전</span>
           </div>
-          <div class="selected-title">
-            <span>선정 제목</span>
-            <strong id="selectedTitle">아직 선정 전</strong>
+          <div id="selectedTitlePanel" class="selected-title-panel">
+            <div class="selected-title-head">
+              <strong>선택된 숏텐츠 제목</strong>
+              <span id="selectedTitleCount" class="hint">0개</span>
+            </div>
+            <div id="selectedTitleList" class="selected-title-list">
+              <span class="hint">아직 선택된 제목이 없습니다.</span>
+            </div>
+            <div class="selected-title-current">
+              <span>생성/확정 제목</span>
+              <strong id="selectedTitle">아직 선정 전</strong>
+            </div>
           </div>
           <textarea id="articlePreview" readonly placeholder="codex.cmd가 생성한 본문이 여기에 표시됩니다."></textarea>
         </section>

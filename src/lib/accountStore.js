@@ -18,13 +18,22 @@ function normalizeSearchChannel() {
   return "blog";
 }
 
+function normalizeArticleLength(value) {
+  const length = Number(value || 1500);
+  return [1200, 1500, 2000].includes(length) ? length : 1500;
+}
+
+function normalizeTopicMode(value) {
+  return String(value || "manual") === "auto" ? "auto" : "manual";
+}
+
 function normalizeCategory(category) {
   if (typeof category === "string") {
     const name = category.trim();
     return {
       id: makeId("cat"),
       name,
-      keyword: name,
+      keyword: "",
       excludedTopics: "",
       publishPurpose: "",
       preferredTone: "",
@@ -38,7 +47,7 @@ function normalizeCategory(category) {
   return {
     id: String(category?.id || makeId("cat")),
     name,
-    keyword: String(category?.keyword || name).trim(),
+    keyword: "",
     excludedTopics: String(category?.excludedTopics || "").trim(),
     publishPurpose: String(category?.publishPurpose || "").trim(),
     preferredTone: String(category?.preferredTone || "").trim(),
@@ -92,7 +101,12 @@ function normalizeAccount(account) {
           title: String(item?.title || item || "").trim()
         }))
         .filter((item) => item.title)
-      : []
+      : [],
+    shortContentWritingTone: String(account?.shortContentWritingTone || "").trim(),
+    shortContentArticleLength: normalizeArticleLength(account?.shortContentArticleLength),
+    shortContentTopicMode: normalizeTopicMode(account?.shortContentTopicMode),
+    shortContentArticlePromptFilePath: String(account?.shortContentArticlePromptFilePath || ""),
+    shortContentImagePromptFilePath: String(account?.shortContentImagePromptFilePath || "")
   };
 }
 
