@@ -214,6 +214,41 @@ assertCondition(
   "src/renderer/index.html: image preview controls must expose 16:9, 9:16, and 1:1 aspect ratio options"
 );
 assertCondition(
+  sourceFiles.rendererIndex.content.includes("id=\"autoRepeatEnabled\"")
+    && sourceFiles.rendererIndex.content.indexOf("id=\"autoRepeatEnabled\"") < sourceFiles.rendererIndex.content.indexOf("id=\"repeatTermMinutes\"")
+    && sourceFiles.settings.content.includes("autoRepeatEnabled: false")
+    && sourceFiles.rendererApp.content.includes("const repeatEnabled = $(\"#autoRepeatEnabled\").checked")
+    && sourceFiles.rendererApp.content.includes("1회성 자동 발행 대상 처리를 완료했습니다.")
+    && sourceFiles.rendererApp.content.includes("state.autoRunning && repeatEnabled"),
+  "automatic publishing must run once unless repeat execution is checked"
+);
+assertCondition(
+  sourceFiles.rendererIndex.content.includes("id=\"shortContentRandomSelectionCount\"")
+    && sourceFiles.accountStore.content.includes("shortContentRandomSelectionCount")
+    && sourceFiles.rendererApp.content.includes("function refillAutoTitleQueue")
+    && sourceFiles.rendererApp.content.includes("shuffledTitles(titles)")
+    && sourceFiles.rendererApp.content.includes("await refillAutoTitleQueue(target.account)")
+    && sourceFiles.rendererApp.content.includes("consumeAutoTitle(target.account, currentTitle)")
+    && sourceFiles.rendererApp.content.includes("target.account.shortContentSelectedTitles.length === 0"),
+  "repeat publishing must refill a random short-content title queue after the selected batch is exhausted"
+);
+assertCondition(
+  sourceFiles.rendererIndex.content.includes("id=\"maxBodyImages\"")
+    && sourceFiles.rendererIndex.content.includes("value=\"1\"")
+    && sourceFiles.rendererIndex.content.includes("value=\"3\"")
+    && sourceFiles.rendererIndex.content.includes("value=\"5\"")
+    && sourceFiles.rendererIndex.content.includes("value=\"7\"")
+    && !sourceFiles.rendererIndex.content.includes("id=\"includeTitleImage\""),
+  "src/renderer/index.html: image count must be limited to 1, 3, 5, 7 and title-image toggle must be removed"
+);
+assertCondition(
+  sourceFiles.rendererIndex.content.includes("id=\"articlePromptText\"")
+    && sourceFiles.rendererIndex.content.includes("id=\"imagePromptText\"")
+    && sourceFiles.accountStore.content.includes("shortContentPromptProfiles")
+    && sourceFiles.accountStore.content.includes("[\"증권\", \"생활경제\"]"),
+  "category prompt profiles must be editable and seed the finance image prompt for 증권 and 생활경제"
+);
+assertCondition(
   sourceFiles.rendererApp.content.includes("imageAspectRatio: normalizeImageAspectRatio($(\"#imageAspectRatio\").value)")
     && sourceFiles.rendererApp.content.includes("imageAspectRatio: form.imageAspectRatio")
     && sourceFiles.rendererApp.content.includes("$(\"#imageAspectRatio\").addEventListener(\"change\""),
@@ -978,14 +1013,45 @@ if (!/context\.preferredTone,\r?\n\s+researchResult\?\.writerContract\?\.tone/.t
   failed = true;
   console.error("src/lib/codexRunner.js: buildWriterContract must prefer user preferredTone over Research/Title tone");
 }
-if (writerPrompt && !writerPrompt.content.includes("Title image prompts may request short Korean headline text")) {
+if (writerPrompt && !writerPrompt.content.includes("Do not prepare a separate title image")) {
   failed = true;
-  console.error("src/lib/codexRunner.js: Writer Agent prompt must allow short Korean text for title image prompts");
+  console.error("src/lib/codexRunner.js: Writer Agent prompt must disable separate title-image generation");
 }
-if (writerPrompt && !writerPrompt.content.includes("Body image prompts must keep the existing no-text policy")) {
+if (
+  mainReviewPrompt
+  && (!mainReviewPrompt.content.includes("Article prompt mode override")
+    || !mainReviewPrompt.content.includes("factualityPass and sourceUsePass must be true")
+    || !mainReviewPrompt.content.includes("never return BLOCK or REVISION solely for absent candidates"))
+) {
   failed = true;
-  console.error("src/lib/codexRunner.js: Writer Agent prompt must keep body images under the existing no-text policy");
+  console.error("src/lib/codexRunner.js: article prompt mode must bypass missing-source factuality blocks");
 }
+if (
+  !sourceFiles.codexRunner.content.includes("function applyArticlePromptMainReviewPolicy")
+  || !sourceFiles.codexRunner.content.includes("applyArticlePromptMainReviewPolicy(mainReviewResult, articlePromptMode)")
+) {
+  failed = true;
+  console.error("src/lib/codexRunner.js: article prompt mode review bypass must be enforced after Main Agent output");
+}
+if (writerPrompt && !writerPrompt.content.includes("category-specific image prompt is the primary visual standard")) {
+  failed = true;
+  console.error("src/lib/codexRunner.js: Writer Agent prompt must prioritize the category image prompt");
+}
+if (
+  writerPrompt
+  && (!writerPrompt.content.includes("immediately below its matching [SECTION - 소제목] line")
+    || !writerPrompt.content.includes("Return exactly 10 useful Korean SEO tags")
+    || !writerPrompt.content.includes("End the article field with the same 10 tags"))
+) {
+  failed = true;
+  console.error("src/lib/codexRunner.js: Writer output must place images below section headings and end with 10 hashtags");
+}
+assertCondition(
+  sourceFiles.imageAssets.content.includes("function placeImageMarkersAfterSections")
+    && sourceFiles.imageAssets.content.includes("function normalizeTenTags")
+    && sourceFiles.imageAssets.content.includes("function appendHashtagLine"),
+  "src/lib/imageAssets.js: normalized results must enforce section-first images and 10 ending hashtags"
+);
 const imageWorkerPrompt = extractFunctionBlock(sourceFiles.codexRunner, "function buildImageWorkerPrompt", "Image Worker prompt");
 if (imageWorkerPrompt && !imageWorkerPrompt.content.includes("Image Worker must not copy image files into the app image directory")) {
   failed = true;
@@ -1003,17 +1069,17 @@ if (imageWorkerPrompt && !imageWorkerPrompt.content.includes("generated image da
   failed = true;
   console.error("src/lib/codexRunner.js: Image Worker prompt must account for base64/data image results");
 }
-if (imageWorkerPrompt && !imageWorkerPrompt.content.includes("Title image policy:")) {
+if (imageWorkerPrompt && !imageWorkerPrompt.content.includes("Do not generate a separate title image")) {
   failed = true;
-  console.error("src/lib/codexRunner.js: Image Worker prompt must separate title image policy");
+  console.error("src/lib/codexRunner.js: Image Worker must disable separate title-image generation");
 }
-if (imageWorkerPrompt && !imageWorkerPrompt.content.includes("Korean text is allowed in the title image")) {
+if (imageWorkerPrompt && !imageWorkerPrompt.content.includes("Follow each Writer Agent prompt exactly")) {
   failed = true;
-  console.error("src/lib/codexRunner.js: title image policy must allow short Korean text");
+  console.error("src/lib/codexRunner.js: Image Worker must follow category-driven image prompts");
 }
-if (imageWorkerPrompt && !imageWorkerPrompt.content.includes("Body image policy:")) {
+if (imageWorkerPrompt && !imageWorkerPrompt.content.includes("Treat bodyImages sequence 1 as the lead/main image")) {
   failed = true;
-  console.error("src/lib/codexRunner.js: Image Worker prompt must keep a separate body image policy");
+  console.error("src/lib/codexRunner.js: Image Worker must treat sequence 1 as the optional prompt-driven lead image");
 }
 if (imageWorkerPrompt && !imageWorkerPrompt.content.includes("Requested image aspect ratio")) {
   failed = true;
@@ -1286,6 +1352,29 @@ if (!sourceFiles.naverPublisher.content.includes("[role='button']:has-text('발�
 if (insertArticleWithImages && !insertArticleWithImages.content.includes("clearAiMarkForLatestImage(page, log")) {
   failed = true;
   console.error("src/lib/naverPublisher.js: body image insertion must attempt to clear Naver AI image mark");
+}
+const safeClickLocator = extractFunctionBlock(sourceFiles.naverPublisher, "async function safeClickLocator", "safe click helper");
+const dismissBlockingEditorPopup = extractFunctionBlock(sourceFiles.naverPublisher, "async function dismissBlockingEditorPopup", "blocking editor popup helper");
+const insertImageByButton = extractFunctionBlock(sourceFiles.naverPublisher, "async function insertImageByButton", "image insertion helper");
+if (
+  safeClickLocator
+  && (!safeClickLocator.content.includes("dismissBlockingEditorPopup")
+    || !safeClickLocator.content.includes("force: true"))
+) {
+  failed = true;
+  console.error("src/lib/naverPublisher.js: blocked clicks must dismiss editor popups and retry with force");
+}
+if (
+  dismissBlockingEditorPopup
+  && (!dismissBlockingEditorPopup.content.includes("keyboard.press(\"Escape\")")
+    || !dismissBlockingEditorPopup.content.includes(".se-popup-dim"))
+) {
+  failed = true;
+  console.error("src/lib/naverPublisher.js: editor popup dismissal must use Escape and popup dim fallback");
+}
+if (insertImageByButton && !insertImageByButton.content.includes("clickLocatorResilient")) {
+  failed = true;
+  console.error("src/lib/naverPublisher.js: image insertion must use resilient image-button clicking");
 }
 
 if (failed) {

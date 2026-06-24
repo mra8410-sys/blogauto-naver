@@ -1,6 +1,19 @@
 const fs = require("node:fs");
 const path = require("node:path");
 
+const ECONOMY_IMAGE_PROMPT_PATH = path.join(__dirname, "..", "prompts", "economy-infographic.txt");
+const ECONOMY_IMAGE_CATEGORIES = new Set(["증권", "생활경제"]);
+
+function readBundledPrompt(filePath) {
+  try {
+    return fs.readFileSync(filePath, "utf8").replace(/^\uFEFF/, "");
+  } catch {
+    return "";
+  }
+}
+
+const ECONOMY_IMAGE_PROMPT = readBundledPrompt(ECONOMY_IMAGE_PROMPT_PATH);
+
 const DEFAULT_ACCOUNT_STORE = {
   selectedAccountId: "",
   accounts: []
@@ -25,6 +38,51 @@ function normalizeArticleLength(value) {
 
 function normalizeTopicMode(value) {
   return String(value || "manual") === "auto" ? "auto" : "manual";
+}
+
+function normalizeRandomSelectionCount(value) {
+  const count = Number(value || 5);
+  return Number.isInteger(count) && count >= 1 && count <= 20 ? count : 5;
+}
+
+function normalizePromptProfile(profile = {}) {
+  return {
+    articlePromptFilePath: String(profile?.articlePromptFilePath || ""),
+    imagePromptFilePath: String(profile?.imagePromptFilePath || ""),
+    articlePromptText: String(profile?.articlePromptText || ""),
+    imagePromptText: String(profile?.imagePromptText || "")
+  };
+}
+
+function normalizeShortContentPromptProfiles(account) {
+  const rawProfiles = account?.shortContentPromptProfiles && typeof account.shortContentPromptProfiles === "object"
+    ? account.shortContentPromptProfiles
+    : {};
+  const profiles = Object.fromEntries(
+    Object.entries(rawProfiles)
+      .map(([category, profile]) => [String(category || "").trim(), normalizePromptProfile(profile)])
+      .filter(([category]) => category)
+  );
+  const selectedCategory = String(account?.shortContentCategory || "").trim();
+  if (selectedCategory) {
+    const current = normalizePromptProfile(profiles[selectedCategory]);
+    if (!current.articlePromptFilePath && account?.shortContentArticlePromptFilePath) {
+      current.articlePromptFilePath = String(account.shortContentArticlePromptFilePath);
+    }
+    if (!current.imagePromptFilePath && account?.shortContentImagePromptFilePath) {
+      current.imagePromptFilePath = String(account.shortContentImagePromptFilePath);
+    }
+    profiles[selectedCategory] = current;
+  }
+  for (const category of ECONOMY_IMAGE_CATEGORIES) {
+    const current = normalizePromptProfile(profiles[category]);
+    if (!current.imagePromptText && !current.imagePromptFilePath) {
+      current.imagePromptFilePath = ECONOMY_IMAGE_PROMPT_PATH;
+      current.imagePromptText = ECONOMY_IMAGE_PROMPT;
+    }
+    profiles[category] = current;
+  }
+  return profiles;
 }
 
 function normalizeCategory(category) {
@@ -68,7 +126,7 @@ function normalizeAccount(account) {
     .map(normalizeCategory)
     .filter((category) => category.name);
 
-  return {
+  const normalizedAccount = {
     id,
     label: String(account?.label || naverId || "Naver 계정").trim(),
     naverId,
@@ -105,9 +163,15 @@ function normalizeAccount(account) {
     shortContentWritingTone: String(account?.shortContentWritingTone || "").trim(),
     shortContentArticleLength: normalizeArticleLength(account?.shortContentArticleLength),
     shortContentTopicMode: normalizeTopicMode(account?.shortContentTopicMode),
+    shortContentRandomSelectionCount: normalizeRandomSelectionCount(account?.shortContentRandomSelectionCount),
     shortContentArticlePromptFilePath: String(account?.shortContentArticlePromptFilePath || ""),
     shortContentImagePromptFilePath: String(account?.shortContentImagePromptFilePath || "")
   };
+  normalizedAccount.shortContentPromptProfiles = normalizeShortContentPromptProfiles({
+    ...normalizedAccount,
+    shortContentPromptProfiles: account?.shortContentPromptProfiles
+  });
+  return normalizedAccount;
 }
 
 function migrateFromSettings(settings) {

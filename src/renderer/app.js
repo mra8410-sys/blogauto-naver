@@ -21,7 +21,9 @@ const state = {
   selectedShortContentTitles: [],
   currentArticleTitle: "",
   articlePromptFilePath: "",
-  imagePromptFilePath: ""
+  imagePromptFilePath: "",
+  articlePromptText: "",
+  imagePromptText: ""
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -45,6 +47,7 @@ const AUTO_TARGET_MAX_ATTEMPTS = 3;
 const AUTO_RESEARCH_MAX_ATTEMPTS = 2;
 const DEFAULT_IMAGE_ASPECT_RATIO = "16:9";
 const IMAGE_ASPECT_RATIOS = new Set([DEFAULT_IMAGE_ASPECT_RATIO, "9:16", "1:1"]);
+const IMAGE_COUNTS = new Set([1, 3, 5, 7]);
 
 function normalizeImageAspectRatio(value) {
   const normalized = String(value || "").trim();
@@ -467,6 +470,11 @@ function escapeHtml(value) {
     .replace(/'/g, "&#39;");
 }
 
+function normalizeImageCount(value) {
+  const count = Number(value);
+  return IMAGE_COUNTS.has(count) ? count : 5;
+}
+
 function setSelectedTitleText(value) {
   state.currentArticleTitle = String(value || "");
   const selectedTitle = $("#selectedTitle");
@@ -565,7 +573,7 @@ function renderAccounts() {
         <span title="${escapeHtml(account.naverId || "-")}">${escapeHtml(account.naverId || "-")}</span>
         <small>블로그 ${escapeHtml(account.blogId || account.naverId || "-")}</small>
         <small>카테고리 ${(account.categories || []).length}개</small>
-        <small>숏텐츠 ${(account.shortContentSelectedTitles || []).length}개 선택</small>
+        <small>숏텐츠 ${(account.shortContentSelectedTitles || []).length}개 대기 · 랜덤 ${normalizeRandomSelectionCount(account.shortContentRandomSelectionCount)}개</small>
       </div>
       <div class="account-actions">
         ${sessionBadge(account)}
@@ -675,8 +683,6 @@ function selectAccount(accountId) {
   const account = state.accountStore.accounts.find((item) => item.id === accountId);
   if (!account) return;
   state.accountStore.selectedAccountId = account.id;
-  account.shortContentSelectedTitles = [];
-  state.selectedShortContentTitles = [];
   fillAccountForm(account);
   clearCategoryForm();
   renderAccounts();
@@ -845,20 +851,34 @@ function normalizeTopicModeValue(value) {
   return String(value || "manual") === "auto" ? "auto" : "manual";
 }
 
+function normalizeRandomSelectionCount(value) {
+  const count = Number(value || 5);
+  return Number.isInteger(count) && count >= 1 && count <= 20 ? count : 5;
+}
+
+function promptProfileFromAccount(account = selectedAccount(), categoryName = "") {
+  const category = String(categoryName || account?.shortContentCategory || "").trim();
+  const profile = category && account?.shortContentPromptProfiles?.[category]
+    ? account.shortContentPromptProfiles[category]
+    : {};
+  return {
+    category,
+    articlePromptFilePath: String(profile?.articlePromptFilePath || ""),
+    imagePromptFilePath: String(profile?.imagePromptFilePath || ""),
+    articlePromptText: String(profile?.articlePromptText || ""),
+    imagePromptText: String(profile?.imagePromptText || "")
+  };
+}
+
 function shortContentSettingsFromAccount(account = selectedAccount()) {
+  const promptProfile = promptProfileFromAccount(account);
   return {
     writingTone: String(account?.shortContentWritingTone || ""),
     articleLength: normalizeArticleLengthValue(account?.shortContentArticleLength),
     topicMode: normalizeTopicModeValue(account?.shortContentTopicMode),
-    articlePromptFilePath: String(account?.shortContentArticlePromptFilePath || ""),
-    imagePromptFilePath: String(account?.shortContentImagePromptFilePath || "")
+    randomSelectionCount: normalizeRandomSelectionCount(account?.shortContentRandomSelectionCount),
+    ...promptProfile
   };
-}
-
-function clearStoredShortContentSelections(accounts = []) {
-  for (const account of Array.isArray(accounts) ? accounts : []) {
-    account.shortContentSelectedTitles = [];
-  }
 }
 
 function syncShortContentsFromAccount(account = selectedAccount()) {
@@ -871,9 +891,16 @@ function syncShortContentsFromAccount(account = selectedAccount()) {
   state.shortContentTitles = normalizeShortContentTitleCache(activeAccount?.shortContentTitleCache || []);
   state.articlePromptFilePath = shortSettings.articlePromptFilePath;
   state.imagePromptFilePath = shortSettings.imagePromptFilePath;
+  state.articlePromptText = shortSettings.articlePromptText;
+  state.imagePromptText = shortSettings.imagePromptText;
   if ($("#writingTone")) $("#writingTone").value = shortSettings.writingTone;
   if ($("#articleLength")) $("#articleLength").value = String(shortSettings.articleLength);
   if ($("#topicMode")) $("#topicMode").value = shortSettings.topicMode;
+  if ($("#shortContentRandomSelectionCount")) {
+    $("#shortContentRandomSelectionCount").value = String(shortSettings.randomSelectionCount);
+  }
+  if ($("#articlePromptText")) $("#articlePromptText").value = state.articlePromptText;
+  if ($("#imagePromptText")) $("#imagePromptText").value = state.imagePromptText;
   renderPromptFileLabels();
   updateModeControls();
   renderShortContentCategories(state.shortContentCategories);
@@ -890,9 +917,31 @@ function persistShortContentsToAccount() {
   account.shortContentWritingTone = $("#writingTone")?.value.trim() || "";
   account.shortContentArticleLength = normalizeArticleLengthValue($("#articleLength")?.value || 1500);
   account.shortContentTopicMode = normalizeTopicModeValue($("#topicMode")?.value || "manual");
-  account.shortContentArticlePromptFilePath = state.articlePromptFilePath;
-  account.shortContentImagePromptFilePath = state.imagePromptFilePath;
+  account.shortContentRandomSelectionCount = normalizeRandomSelectionCount($("#shortContentRandomSelectionCount")?.value || 5);
+  const category = String(state.selectedShortContentCategory || account.shortContentCategory || "").trim();
+  state.articlePromptText = $("#articlePromptText")?.value || "";
+  state.imagePromptText = $("#imagePromptText")?.value || "";
+  if (category) {
+    account.shortContentPromptProfiles = account.shortContentPromptProfiles || {};
+    account.shortContentPromptProfiles[category] = {
+      articlePromptFilePath: state.articlePromptFilePath,
+      imagePromptFilePath: state.imagePromptFilePath,
+      articlePromptText: state.articlePromptText,
+      imagePromptText: state.imagePromptText
+    };
+  }
   return account;
+}
+
+function loadPromptProfileForCategory(categoryName, account = selectedAccount()) {
+  const profile = promptProfileFromAccount(account, categoryName);
+  state.articlePromptFilePath = profile.articlePromptFilePath;
+  state.imagePromptFilePath = profile.imagePromptFilePath;
+  state.articlePromptText = profile.articlePromptText;
+  state.imagePromptText = profile.imagePromptText;
+  if ($("#articlePromptText")) $("#articlePromptText").value = profile.articlePromptText;
+  if ($("#imagePromptText")) $("#imagePromptText").value = profile.imagePromptText;
+  renderPromptFileLabels();
 }
 
 function renderShortContentCategories(categories = []) {
@@ -946,16 +995,22 @@ function fileNameFromPath(filePath = "") {
 function renderPromptFileLabels() {
   const articleLabel = $("#articlePromptFileName");
   const imageLabel = $("#imagePromptFileName");
+  const categoryLabel = $("#promptCategoryName");
+  if (categoryLabel) {
+    categoryLabel.textContent = state.selectedShortContentCategory
+      ? `${state.selectedShortContentCategory} 카테고리 설정`
+      : "숏텐츠 카테고리를 선택하세요.";
+  }
   if (articleLabel) {
     articleLabel.textContent = state.articlePromptFilePath
       ? fileNameFromPath(state.articlePromptFilePath)
-      : "선택된 파일 없음";
+      : (state.articlePromptText ? "직접 입력한 프롬프트" : "선택된 파일 없음");
     articleLabel.title = state.articlePromptFilePath || "";
   }
   if (imageLabel) {
     imageLabel.textContent = state.imagePromptFilePath
       ? fileNameFromPath(state.imagePromptFilePath)
-      : "선택된 파일 없음";
+      : (state.imagePromptText ? "직접 입력한 프롬프트" : "선택된 파일 없음");
     imageLabel.title = state.imagePromptFilePath || "";
   }
 }
@@ -992,7 +1047,11 @@ async function loadShortContentTitles(categoryName, options = {}) {
     addLog({ level: "warn", message: "숏텐츠 제목을 관리할 계정을 먼저 선택하세요.", at: new Date().toISOString() });
     return;
   }
+  if (state.selectedShortContentCategory && state.selectedShortContentCategory !== category) {
+    persistShortContentsToAccount();
+  }
   state.selectedShortContentCategory = category;
+  loadPromptProfileForCategory(category);
   if (!preserveSelected) {
     state.selectedShortContentTitles = [];
   }
@@ -1035,8 +1094,10 @@ function collectForm(target = {}) {
   const accountSelectedTitles = Array.isArray(account?.shortContentSelectedTitles)
     ? account.shortContentSelectedTitles.map((title) => String(title || "").trim()).filter(Boolean)
     : [];
-  const selectedTitle = target.account
-    ? (accountSelectedTitles[0] || "")
+  const selectedTitle = target.title
+    ? String(target.title).trim()
+    : target.account
+      ? (accountSelectedTitles[0] || "")
     : (state.selectedShortContentTitles[0] || accountSelectedTitles[0] || "");
   return {
     accountId: account?.id || "",
@@ -1044,6 +1105,7 @@ function collectForm(target = {}) {
     blogId: useSelectedAccount ? (account?.blogId || account?.naverId || "") : ($("#blogId").value.trim() || $("#naverId").value.trim()),
     naverPassword: useSelectedAccount ? (account?.naverPassword || "") : $("#naverPassword").value,
     topicMode: publishMode,
+    autoRepeatEnabled: $("#autoRepeatEnabled").checked,
     repeatTermMinutes: Number($("#repeatTermMinutes").value || 60),
     topic: selectedTitle,
     category: category?.name || "",
@@ -1055,6 +1117,8 @@ function collectForm(target = {}) {
     articleLength: usesTargetAccountSettings ? accountShortSettings.articleLength : normalizeArticleLengthValue($("#articleLength")?.value || 1500),
     articlePromptFilePath: usesTargetAccountSettings ? accountShortSettings.articlePromptFilePath : state.articlePromptFilePath,
     imagePromptFilePath: usesTargetAccountSettings ? accountShortSettings.imagePromptFilePath : state.imagePromptFilePath,
+    articlePromptText: usesTargetAccountSettings ? accountShortSettings.articlePromptText : ($("#articlePromptText")?.value || state.articlePromptText),
+    imagePromptText: usesTargetAccountSettings ? accountShortSettings.imagePromptText : ($("#imagePromptText")?.value || state.imagePromptText),
     freshnessLevel: "high",
     searchChannel: ["blog", "web"].includes(category?.searchChannel) ? category.searchChannel : "blog",
     trustBlogAsSource: category?.trustBlogAsSource === true,
@@ -1069,9 +1133,9 @@ function collectForm(target = {}) {
     publishPrivate: $("#publishVisibility").value !== "public",
     publishScheduleMode: $("#publishScheduleMode").value,
     reserveAfterHours: Number($("#reserveAfterHours").value || 0),
-    includeTitleImage: $("#includeTitleImage").checked,
+    includeTitleImage: false,
     imageAspectRatio: normalizeImageAspectRatio($("#imageAspectRatio").value),
-    maxBodyImages: Number($("#maxBodyImages").value),
+    maxBodyImages: normalizeImageCount($("#maxBodyImages").value),
     breakSentencesInBody: $("#breakSentencesInBody").checked,
     agentModels: currentAgentModels(),
     failOnLoginRequired: target.failOnLoginRequired === true
@@ -1095,12 +1159,10 @@ function applySettings(settings) {
     }
   }
   $("#publishAfterGenerate").checked = true;
-  $("#includeTitleImage").checked = settings.includeTitleImage !== false;
+  $("#autoRepeatEnabled").checked = settings.autoRepeatEnabled === true;
   $("#imageAspectRatio").value = normalizeImageAspectRatio(settings.imageAspectRatio);
+  $("#maxBodyImages").value = String(normalizeImageCount(settings.maxBodyImages));
   $("#breakSentencesInBody").checked = settings.breakSentencesInBody !== false;
-  state.articlePromptFilePath = String(settings.articlePromptFilePath || "");
-  state.imagePromptFilePath = String(settings.imagePromptFilePath || "");
-  renderPromptFileLabels();
   applyAgentModels(settings.agentModels);
   if (settings.publishPrivate === false) $("#publishVisibility").value = "public";
   updateModeControls();
@@ -1125,11 +1187,12 @@ async function saveSettingsNow() {
     publishAfterGenerate: form.publishAfterGenerate,
     publishPrivate: form.publishPrivate,
     topicMode: form.topicMode,
+    autoRepeatEnabled: form.autoRepeatEnabled,
     repeatTermMinutes: form.repeatTermMinutes,
     publishVisibility: form.publishVisibility,
     publishScheduleMode: form.publishScheduleMode,
     reserveAfterHours: form.reserveAfterHours,
-    includeTitleImage: form.includeTitleImage,
+    includeTitleImage: false,
     imageAspectRatio: form.imageAspectRatio,
     maxBodyImages: form.maxBodyImages,
     breakSentencesInBody: form.breakSentencesInBody,
@@ -1156,8 +1219,10 @@ function scheduleSettingsSave() {
 
 function updateModeControls() {
   const isAuto = $("#topicMode").value === "auto";
+  const repeatEnabled = $("#autoRepeatEnabled").checked;
   const isPrivatePublish = $("#publishVisibility").value !== "public";
   $("#repeatTermLabel").style.display = isAuto ? "grid" : "none";
+  $("#repeatTermMinutes").disabled = !repeatEnabled;
   $("#publishOptionsRow").style.display = isAuto ? "flex" : "none";
   $("#manualTopicLabel").style.display = "none";
   $("#publishAfterGenerate").checked = true;
@@ -1176,14 +1241,62 @@ function updateModeControls() {
 function getAutoTargets() {
   const targets = [];
   for (const account of state.accountStore.accounts.filter((item) => item.checked !== false)) {
-    const hasSelectedShortTitle = Array.isArray(account.shortContentSelectedTitles)
-      && account.shortContentSelectedTitles.some((title) => String(title || "").trim());
-    if (!hasSelectedShortTitle) continue;
+    if (!String(account.shortContentCategory || "").trim()) continue;
     for (const category of (account.categories || []).filter((item) => item.checked !== false && hasCategoryName(item))) {
       targets.push({ account, category });
     }
   }
   return targets;
+}
+
+function shuffledTitles(titles = []) {
+  const items = (Array.isArray(titles) ? titles : [])
+    .map((item) => String(item?.title || item || "").trim())
+    .filter(Boolean);
+  for (let index = items.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [items[index], items[swapIndex]] = [items[swapIndex], items[index]];
+  }
+  return items;
+}
+
+async function refillAutoTitleQueue(account, options = {}) {
+  const category = String(account?.shortContentCategory || "").trim();
+  if (!account || !category) return [];
+  const count = normalizeRandomSelectionCount(account.shortContentRandomSelectionCount);
+  const result = await window.blogAuto.loadShortContentTitles(category);
+  const titles = normalizeShortContentTitleCache(result?.titles || []);
+  const selected = shuffledTitles(titles).slice(0, Math.min(count, titles.length));
+  account.shortContentTitleCache = titles;
+  account.shortContentSelectedTitles = selected;
+
+  if (account.id === selectedAccount()?.id) {
+    state.shortContentTitles = titles;
+    state.selectedShortContentTitles = [...selected];
+    state.selectedShortContentCategory = category;
+    renderShortContentCategories(state.shortContentCategories);
+    renderShortContentTitles(titles, category);
+    setSelectedTitleText(selected[0] || "아직 선정 전");
+  }
+  await saveAccountStoreNow();
+  addLog({
+    level: "info",
+    message: `${account.label || account.naverId} / ${category} 카테고리를 다시 불러와 제목 ${titles.length}개 중 ${selected.length}개를 랜덤 선택했습니다.`,
+    at: new Date().toISOString()
+  });
+  return selected;
+}
+
+function consumeAutoTitle(account, title) {
+  const target = String(title || "").trim();
+  account.shortContentSelectedTitles = (Array.isArray(account.shortContentSelectedTitles)
+    ? account.shortContentSelectedTitles
+    : []).filter((item, index) => index > 0 || String(item || "").trim() !== target);
+  if (account.id === selectedAccount()?.id) {
+    state.selectedShortContentTitles = [...account.shortContentSelectedTitles];
+    renderShortContentTitles(state.shortContentTitles, state.selectedShortContentCategory);
+    setSelectedTitleText(state.selectedShortContentTitles[0] || "아직 선정 전");
+  }
 }
 
 function nextDifferentAccountIndex(targets, index) {
@@ -1286,7 +1399,8 @@ async function startAutoPublishing(startTargetKey = "") {
     Array.isArray(target.account?.shortContentSelectedTitles)
       && target.account.shortContentSelectedTitles.some((title) => String(title || "").trim())
   ));
-  if (!checkedTargetsWithShortTitles.length) {
+  const repeatEnabled = $("#autoRepeatEnabled").checked;
+  if (!repeatEnabled && !checkedTargetsWithShortTitles.length) {
     throw new Error("자동 발행하려면 계정별 숏텐츠 제목을 먼저 선택하세요.");
   }
   state.running = true;
@@ -1297,11 +1411,32 @@ async function startAutoPublishing(startTargetKey = "") {
   await saveSettingsNow();
   setTokenTotal(0);
 
+  const oneShotTargetKeys = new Set(
+    getAutoTargets()
+      .filter((target) => Array.isArray(target.account.shortContentSelectedTitles) && target.account.shortContentSelectedTitles.length)
+      .map(autoTargetKey)
+  );
+  addLog({
+    level: "info",
+    message: repeatEnabled
+      ? `반복 자동 발행을 시작합니다. 작업 사이 대기 시간은 ${Number($("#repeatTermMinutes").value || 60)}분입니다.`
+      : `1회성 자동 발행을 시작합니다. 대상 ${oneShotTargetKeys.size}개를 한 번씩 처리합니다.`,
+    at: new Date().toISOString()
+  });
   let index = startTargetKey ? findAutoTargetIndex(getAutoTargets(), startTargetKey) : 0;
   autoLoop:
   while (state.autoRunning) {
-    const targets = getAutoTargets();
+    const targets = getAutoTargets()
+      .filter((target) => repeatEnabled || oneShotTargetKeys.has(autoTargetKey(target)));
     if (!targets.length) {
+      if (!repeatEnabled) {
+        addLog({
+          level: "info",
+          message: "1회성 자동 발행 대상 처리를 완료했습니다.",
+          at: new Date().toISOString()
+        });
+        break;
+      }
       addLog({
         level: "warn",
         message: "체크된 계정 중 자동 발행 가능한 대상이 없습니다.",
@@ -1312,7 +1447,36 @@ async function startAutoPublishing(startTargetKey = "") {
     }
     index %= targets.length;
     const target = targets[index];
+    if (!Array.isArray(target.account.shortContentSelectedTitles) || !target.account.shortContentSelectedTitles.length) {
+      if (repeatEnabled) {
+        await refillAutoTitleQueue(target.account);
+        if (!target.account.shortContentSelectedTitles.length) {
+          addLog({
+            level: "warn",
+            message: `${target.account.label || target.account.naverId} 계정에서 선택할 숏텐츠 제목을 찾지 못해 다음 주기에 다시 시도합니다.`,
+            at: new Date().toISOString()
+          });
+          index += 1;
+          await delayAuto(Number($("#repeatTermMinutes").value || 60));
+          continue;
+        }
+      } else {
+        oneShotTargetKeys.delete(autoTargetKey(target));
+        index = 0;
+        continue;
+      }
+    }
     if (target.account.sessionStatus === "expired") {
+      if (!repeatEnabled) {
+        addLog({
+          level: "warn",
+          message: `${target.account.label || target.account.naverId} 계정은 세션만료 상태라 이번 1회성 작업에서 건너뜁니다.`,
+          at: new Date().toISOString()
+        });
+        oneShotTargetKeys.delete(autoTargetKey(target));
+        index = 0;
+        continue;
+      }
       setPendingAutoTarget(target);
       addLog({
         level: "warn",
@@ -1341,6 +1505,7 @@ async function startAutoPublishing(startTargetKey = "") {
       break;
     }
     clearPendingAutoTarget(autoTargetKey(target));
+    const currentTitle = String(target.account.shortContentSelectedTitles[0] || "").trim();
     let autoAttemptLimit = AUTO_TARGET_MAX_ATTEMPTS;
     for (let attempt = 1; attempt <= autoAttemptLimit && state.autoRunning; attempt += 1) {
       addLog({
@@ -1355,6 +1520,7 @@ async function startAutoPublishing(startTargetKey = "") {
       const result = await runAutoStartJob(collectForm({
         account: target.account,
         category: target.category,
+        title: currentTitle,
         failOnLoginRequired: true
       }));
       if (result?.status === "codex_usage_limit") {
@@ -1370,6 +1536,17 @@ async function startAutoPublishing(startTargetKey = "") {
         target.account.sessionStatus = "expired";
         setPendingAutoTarget(target);
         renderAccounts();
+        if (!repeatEnabled) {
+          addLog({
+            level: "warn",
+            message: `${target.account.label || target.account.naverId} 계정 세션이 만료되어 이번 1회성 작업에서 건너뜁니다.`,
+            at: new Date().toISOString()
+          });
+          clearPendingAutoTarget(autoTargetKey(target));
+          oneShotTargetKeys.delete(autoTargetKey(target));
+          index = 0;
+          continue autoLoop;
+        }
         addLog({
           level: "warn",
           message: `${target.account.label || target.account.naverId} 계정은 세션만료 상태입니다. ${target.category.name} 작업은 세션확인 또는 반복주기까지 대기합니다.`,
@@ -1414,8 +1591,23 @@ async function startAutoPublishing(startTargetKey = "") {
         at: new Date().toISOString()
       });
     }
-    index += 1;
-    if (state.autoRunning) {
+    consumeAutoTitle(target.account, currentTitle);
+    await saveAccountStoreNow();
+    addLog({
+      level: "info",
+      message: `${target.account.label || target.account.naverId} 제목 처리 완료: ${currentTitle} / 남은 제목 ${target.account.shortContentSelectedTitles.length}개`,
+      at: new Date().toISOString()
+    });
+    if (repeatEnabled && target.account.shortContentSelectedTitles.length === 0) {
+      await refillAutoTitleQueue(target.account);
+    }
+    if (!repeatEnabled) {
+      oneShotTargetKeys.delete(autoTargetKey(target));
+      index = 0;
+    } else {
+      index += 1;
+    }
+    if (state.autoRunning && repeatEnabled) {
       await delayAuto(Number($("#repeatTermMinutes").value || 60));
     }
   }
@@ -1428,7 +1620,7 @@ async function startAutoPublishing(startTargetKey = "") {
   state.running = false;
   $("#startButton").disabled = false;
   $("#stopAutoButton").disabled = true;
-  setRunState("generated", "자동 중지");
+  setRunState("generated", repeatEnabled ? "자동 중지" : "1회 발행 완료");
 }
 
 async function startManualJob() {
@@ -1461,12 +1653,6 @@ async function boot() {
   $("#runtimePath").textContent = initial.runtimeRoot;
   state.chrome = initial.chrome || state.chrome;
   state.accountStore = initial.accountStore || state.accountStore;
-  clearStoredShortContentSelections(state.accountStore.accounts);
-  try {
-    state.accountStore = await window.blogAuto.saveAccountStore(state.accountStore);
-  } catch (error) {
-    addLog({ level: "error", message: `숏텐츠 선택 초기화 저장 실패: ${error.message}`, at: new Date().toISOString() });
-  }
   applySettings(initial.settings || {});
   setCodexRateLimits(initial.settings?.codexRateLimits || null);
   refreshCodexUsageOnStartup();
@@ -1572,11 +1758,15 @@ async function boot() {
     const filePath = await window.blogAuto.choosePromptFile("글 작성 프롬프트 파일 선택");
     if (!filePath) return;
     state.articlePromptFilePath = filePath;
+    state.articlePromptText = await window.blogAuto.readPromptFile(filePath);
+    $("#articlePromptText").value = state.articlePromptText;
     renderPromptFileLabels();
     scheduleSettingsSave();
   });
   $("#clearArticlePromptFileButton")?.addEventListener("click", () => {
     state.articlePromptFilePath = "";
+    state.articlePromptText = "";
+    $("#articlePromptText").value = "";
     renderPromptFileLabels();
     scheduleSettingsSave();
   });
@@ -1584,12 +1774,24 @@ async function boot() {
     const filePath = await window.blogAuto.choosePromptFile("이미지 프롬프트 파일 선택");
     if (!filePath) return;
     state.imagePromptFilePath = filePath;
+    state.imagePromptText = await window.blogAuto.readPromptFile(filePath);
+    $("#imagePromptText").value = state.imagePromptText;
     renderPromptFileLabels();
     scheduleSettingsSave();
   });
   $("#clearImagePromptFileButton")?.addEventListener("click", () => {
     state.imagePromptFilePath = "";
+    state.imagePromptText = "";
+    $("#imagePromptText").value = "";
     renderPromptFileLabels();
+    scheduleSettingsSave();
+  });
+  $("#articlePromptText")?.addEventListener("input", () => {
+    state.articlePromptText = $("#articlePromptText").value;
+    scheduleSettingsSave();
+  });
+  $("#imagePromptText")?.addEventListener("input", () => {
+    state.imagePromptText = $("#imagePromptText").value;
     scheduleSettingsSave();
   });
 
@@ -1628,6 +1830,7 @@ async function boot() {
       shortContentWritingTone: "",
       shortContentArticleLength: 1500,
       shortContentTopicMode: "manual",
+      shortContentRandomSelectionCount: 5,
       shortContentArticlePromptFilePath: "",
       shortContentImagePromptFilePath: ""
     };
@@ -1811,8 +2014,23 @@ async function boot() {
     });
   });
   $("#topicMode").addEventListener("change", updateModeControls);
+  $("#autoRepeatEnabled").addEventListener("change", () => {
+    updateModeControls();
+    saveSettingsNow().catch((error) => {
+      $("#settingsState").textContent = "설정 저장 실패";
+      addLog({ level: "error", message: error.message, at: new Date().toISOString() });
+    });
+  });
   $("#writingTone")?.addEventListener("input", scheduleSettingsSave);
   $("#articleLength")?.addEventListener("change", scheduleSettingsSave);
+  $("#shortContentRandomSelectionCount")?.addEventListener("change", () => {
+    const count = normalizeRandomSelectionCount($("#shortContentRandomSelectionCount").value);
+    $("#shortContentRandomSelectionCount").value = String(count);
+    persistShortContentsToAccount();
+    saveAccountStoreNow().catch((error) => {
+      addLog({ level: "error", message: `랜덤 선택 수량 저장 실패: ${error.message}`, at: new Date().toISOString() });
+    });
+  });
   $("#publishVisibility").addEventListener("change", updateModeControls);
   $("#publishScheduleMode").addEventListener("change", updateModeControls);
   $("#jobForm").querySelectorAll("input, select, textarea").forEach((control) => {

@@ -48,6 +48,9 @@ const path = require("node:path");
       ["account list", "#accountList"],
       ["category list", "#categoryList"],
       ["topic mode", "#topicMode"],
+      ["random short-content count", "#shortContentRandomSelectionCount"],
+      ["auto repeat enabled", "#autoRepeatEnabled"],
+      ["repeat term", "#repeatTermMinutes"],
       ["publish visibility", "#publishVisibility"],
       ["publish schedule", "#publishScheduleMode"],
       ["main log", "#mainLogStream"],
@@ -59,7 +62,10 @@ const path = require("node:path");
       ["category preferred tone", "#categoryPreferredTone"],
       ["category freshness level", "#categoryFreshnessLevel"],
       ["article", "#articlePreview"],
+      ["article prompt editor", "#articlePromptText"],
+      ["image prompt editor", "#imagePromptText"],
       ["image aspect ratio", "#imageAspectRatio"],
+      ["image count", "#maxBodyImages"],
       ["image grid", "#imageGrid"],
       ["history", "#historyBody"],
       ["codex primary usage badge", "#codexPrimaryLimitBadge"],
@@ -164,6 +170,7 @@ const path = require("node:path");
       "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
       "base64"
     ));
+    await window.waitForTimeout(1200);
     await window.evaluate(async ({ sampleImagePath }) => {
       await window.blogAuto.saveAccountStore({
         selectedAccountId: "acct_smoke_delete",
@@ -184,6 +191,9 @@ const path = require("node:path");
           imageStylePromptStatus: "ready",
           imageStylePromptSourceImageHash: "smokehash",
           imageStylePromptError: "",
+          shortContentCategory: "증권",
+          shortContentSelectedTitles: ["스모크 테스트 제목"],
+          shortContentTitleCache: [{ id: "smoke_title_1", title: "스모크 테스트 제목" }],
           categories: [{
             id: "cat_smoke_delete",
             name: "Smoke Category",
@@ -194,6 +204,7 @@ const path = require("node:path");
       });
     }, { sampleImagePath: smokeSampleImagePath });
     await window.waitForSelector(".account-row");
+    await window.waitForSelector(".account-row:has-text('Smoke Delete Account')");
     const rowSessionButtons = await window.locator(".account-row [data-action='session']").count();
     if (!rowSessionButtons) {
       throw new Error("Account row session check button is missing.");
@@ -210,6 +221,8 @@ const path = require("node:path");
       }
       const originalHooks = window.__blogAutoTestHooks;
       const originalDelayMinutes = document.querySelector("#repeatTermMinutes")?.value || "60";
+      const repeatEnabled = document.querySelector("#autoRepeatEnabled");
+      const originalRepeatEnabled = repeatEnabled?.checked === true;
       let calls = 0;
       window.__blogAutoTestHooks = {
         ...(originalHooks || {}),
@@ -222,6 +235,7 @@ const path = require("node:path");
       };
       const repeatTerm = document.querySelector("#repeatTermMinutes");
       if (repeatTerm) repeatTerm.value = "0";
+      if (repeatEnabled) repeatEnabled.checked = true;
       try {
         await window.startAutoPublishing();
       } finally {
@@ -231,6 +245,7 @@ const path = require("node:path");
           delete window.__blogAutoTestHooks;
         }
         if (repeatTerm) repeatTerm.value = originalDelayMinutes;
+        if (repeatEnabled) repeatEnabled.checked = originalRepeatEnabled;
       }
       return calls;
     });
@@ -240,6 +255,8 @@ const path = require("node:path");
     const researchRetryCalls = await window.evaluate(async () => {
       const originalHooks = window.__blogAutoTestHooks;
       const originalDelayMinutes = document.querySelector("#repeatTermMinutes")?.value || "60";
+      const repeatEnabled = document.querySelector("#autoRepeatEnabled");
+      const originalRepeatEnabled = repeatEnabled?.checked === true;
       let calls = 0;
       window.__blogAutoTestHooks = {
         ...(originalHooks || {}),
@@ -257,6 +274,7 @@ const path = require("node:path");
       };
       const repeatTerm = document.querySelector("#repeatTermMinutes");
       if (repeatTerm) repeatTerm.value = "0";
+      if (repeatEnabled) repeatEnabled.checked = true;
       try {
         await window.startAutoPublishing();
       } finally {
@@ -266,6 +284,7 @@ const path = require("node:path");
           delete window.__blogAutoTestHooks;
         }
         if (repeatTerm) repeatTerm.value = originalDelayMinutes;
+        if (repeatEnabled) repeatEnabled.checked = originalRepeatEnabled;
       }
       return calls;
     });

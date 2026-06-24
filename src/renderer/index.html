@@ -162,25 +162,45 @@
                     <option value="auto">자동</option>
                   </select>
                 </label>
+                <label>
+                  <span>자동 랜덤 선택 수량</span>
+                  <input id="shortContentRandomSelectionCount" type="number" min="1" max="20" step="1" value="5" />
+                </label>
                 <label class="compact-check wide">
                   <input id="breakSentencesInBody" type="checkbox" checked />
                   본문 내 문장 줄바꿈
                 </label>
-                <div class="prompt-file-row wide">
-                  <div>
-                    <strong>글 작성 프롬프트 파일</strong>
-                    <span id="articlePromptFileName" class="hint">선택된 파일 없음</span>
+                <div class="category-prompt-editor wide">
+                  <div class="prompt-editor-head">
+                    <div>
+                      <strong>카테고리별 글 작성 프롬프트</strong>
+                      <span id="promptCategoryName" class="hint">숏텐츠 카테고리를 선택하세요.</span>
+                    </div>
                   </div>
-                  <button id="chooseArticlePromptFileButton" class="ghost small" type="button">파일 선택</button>
-                  <button id="clearArticlePromptFileButton" class="ghost small" type="button">해제</button>
+                  <textarea id="articlePromptText" rows="8" placeholder="비워두면 기본 글 작성 방식으로 생성합니다."></textarea>
+                  <div class="prompt-file-row">
+                    <div>
+                      <span id="articlePromptFileName" class="hint">선택된 파일 없음</span>
+                    </div>
+                    <button id="chooseArticlePromptFileButton" class="ghost small" type="button">파일 불러오기</button>
+                    <button id="clearArticlePromptFileButton" class="ghost small" type="button">초기화</button>
+                  </div>
                 </div>
-                <div class="prompt-file-row wide">
-                  <div>
-                    <strong>이미지 프롬프트 파일</strong>
-                    <span id="imagePromptFileName" class="hint">선택된 파일 없음</span>
+                <div class="category-prompt-editor wide">
+                  <div class="prompt-editor-head">
+                    <div>
+                      <strong>카테고리별 이미지 프롬프트</strong>
+                      <span class="hint">비워두면 AI가 기본 이미지 프롬프트를 생성합니다.</span>
+                    </div>
                   </div>
-                  <button id="chooseImagePromptFileButton" class="ghost small" type="button">파일 선택</button>
-                  <button id="clearImagePromptFileButton" class="ghost small" type="button">해제</button>
+                  <textarea id="imagePromptText" rows="10" placeholder="이미지 스타일, 구성, 한글 문구 규칙 등을 입력하세요."></textarea>
+                  <div class="prompt-file-row">
+                    <div>
+                      <span id="imagePromptFileName" class="hint">선택된 파일 없음</span>
+                    </div>
+                    <button id="chooseImagePromptFileButton" class="ghost small" type="button">파일 불러오기</button>
+                    <button id="clearImagePromptFileButton" class="ghost small" type="button">초기화</button>
+                  </div>
                 </div>
               </div>
             </section>
@@ -236,10 +256,16 @@
               <div id="categoryList" class="category-list"></div>
             </div>
 
-            <label id="repeatTermLabel">
-              <span>반복주기 Term (분)</span>
-              <input id="repeatTermMinutes" type="number" min="1" step="1" value="60" />
-            </label>
+            <div id="repeatTermLabel" class="repeat-term-control">
+              <label class="compact-check">
+                <input id="autoRepeatEnabled" type="checkbox" />
+                반복 실행
+              </label>
+              <label>
+                <span>반복주기 Term (분)</span>
+                <input id="repeatTermMinutes" type="number" min="1" step="1" value="60" />
+              </label>
+            </div>
             <label id="manualTopicLabel" class="wide legacy-overlap-control">
               <span>주제</span>
               <input id="topic" name="topic" />
@@ -328,21 +354,13 @@
                   <option value="1:1">1:1</option>
                 </select>
               </label>
-              <label class="compact-check"><input id="includeTitleImage" type="checkbox" checked /> 타이틀이미지생성</label>
               <label class="compact-select">
                 <span>본문이미지최대</span>
                 <select id="maxBodyImages">
-                  <option value="0">0장</option>
                   <option value="1">1장</option>
-                  <option value="2" selected>2장</option>
                   <option value="3">3장</option>
-                  <option value="4">4장</option>
-                  <option value="5">5장</option>
-                  <option value="6">6장</option>
+                  <option value="5" selected>5장</option>
                   <option value="7">7장</option>
-                  <option value="8">8장</option>
-                  <option value="9">9장</option>
-                  <option value="10">10장</option>
                 </select>
               </label>
             </div>

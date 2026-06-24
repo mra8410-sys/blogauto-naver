@@ -22,13 +22,14 @@ const DEFAULT_SETTINGS = {
   publishAfterGenerate: false,
   publishPrivate: false,
   topicMode: "manual",
+  autoRepeatEnabled: false,
   repeatTermMinutes: 60,
   publishVisibility: "public",
   publishScheduleMode: "now",
   reserveAfterHours: 3,
-  includeTitleImage: true,
+  includeTitleImage: false,
   imageAspectRatio: DEFAULT_IMAGE_ASPECT_RATIO,
-  maxBodyImages: 2,
+  maxBodyImages: 5,
   breakSentencesInBody: true,
   writingTone: "",
   articleLength: 1500,
@@ -65,11 +66,16 @@ function normalizeSettings(settings) {
     normalized.codexCmdPath = DEFAULT_SETTINGS.codexCmdPath;
   }
   normalized.repeatTermMinutes = Math.max(1, Number(normalized.repeatTermMinutes || DEFAULT_SETTINGS.repeatTermMinutes));
+  normalized.autoRepeatEnabled = normalized.autoRepeatEnabled === true;
   normalized.reserveAfterHours = Math.max(1, Number(normalized.reserveAfterHours || DEFAULT_SETTINGS.reserveAfterHours));
   normalized.articleLength = [1200, 1500, 2000].includes(Number(normalized.articleLength))
     ? Number(normalized.articleLength)
     : DEFAULT_SETTINGS.articleLength;
   normalized.imageAspectRatio = normalizeImageAspectRatio(normalized.imageAspectRatio);
+  normalized.includeTitleImage = false;
+  normalized.maxBodyImages = [1, 3, 5, 7].includes(Number(normalized.maxBodyImages))
+    ? Number(normalized.maxBodyImages)
+    : DEFAULT_SETTINGS.maxBodyImages;
   return normalized;
 }
 

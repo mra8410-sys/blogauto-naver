@@ -535,7 +535,7 @@ function parseProgressLine(text, options = {}) {
   const match = String(text || "").trim().match(/^BLOGAUTO_PROGRESS:\s*(.+)$/i);
   if (!match) return null;
   const code = match[1].trim().toLowerCase();
-  const bodyImageLimit = Math.min(10, Math.max(0, Number.isFinite(Number(options.maxBodyImages)) ? Number(options.maxBodyImages) : 2));
+  const bodyImageLimit = [1, 3, 5, 7].includes(Number(options.maxBodyImages)) ? Number(options.maxBodyImages) : 5;
   const usesImages = options.includeTitleImage !== false || bodyImageLimit > 0;
   if (code === "image" && !usesImages) return null;
   const labels = {
@@ -598,8 +598,13 @@ function readOptionalPromptFile(filePath = "") {
   }
 }
 
-function hasArticlePromptMode(filePath = "") {
-  return Boolean(readOptionalPromptFile(filePath));
+function resolvePromptText(inlineText = "", filePath = "") {
+  const inline = String(inlineText || "").trim();
+  return inline || readOptionalPromptFile(filePath);
+}
+
+function hasArticlePromptMode(filePath = "", inlineText = "") {
+  return Boolean(resolvePromptText(inlineText, filePath));
 }
 
 function buildPrompt({
@@ -612,7 +617,7 @@ function buildPrompt({
   runtimeRoot,
   currentDateLabel,
   includeTitleImage = true,
-  maxBodyImages = 2,
+  maxBodyImages = 5,
   sourceQuality = null,
   topicMode = "manual",
   researchTitleResult = null,
@@ -622,6 +627,8 @@ function buildPrompt({
   articleLength = 1500,
   articlePromptFilePath = "",
   imagePromptFilePath = "",
+  articlePromptText = "",
+  imagePromptText = "",
   freshnessLevel = "auto",
   writerRevisionFeedback = "",
   writerAttempt = 1,
@@ -630,12 +637,13 @@ function buildPrompt({
 }) {
   const resultPath = path.join(jobDir, "agent-result.json");
   const imageDir = path.join(runtimeRoot || path.dirname(path.dirname(jobDir)), "image");
-  const bodyImageLimit = Math.min(10, Math.max(0, Number.isFinite(Number(maxBodyImages)) ? Number(maxBodyImages) : 2));
+  const bodyImageLimit = [1, 3, 5, 7].includes(Number(maxBodyImages)) ? Number(maxBodyImages) : 5;
   const targetArticleLength = [1200, 1500, 2000].includes(Number(articleLength)) ? Number(articleLength) : 1500;
   const usesImages = includeTitleImage !== false || bodyImageLimit > 0;
-  const articlePromptText = readOptionalPromptFile(articlePromptFilePath);
-  const imagePromptText = readOptionalPromptFile(imagePromptFilePath);
-  const usesArticlePromptMode = Boolean(articlePromptText);
+  const resolvedArticlePromptText = resolvePromptText(articlePromptText, articlePromptFilePath);
+  const resolvedImagePromptText = resolvePromptText(imagePromptText, imagePromptFilePath);
+  const usesArticlePromptMode = Boolean(resolvedArticlePromptText);
+  const usesCustomImagePrompt = Boolean(resolvedImagePromptText);
   const researchSearchNeed = String(researchTitleResult?.searchNeed || "").toLowerCase();
   const selectedFinalTitle = String(researchTitleResult?.finalTitle || researchTitleResult?.selectedTitle || "").trim();
   const writerContract = buildWriterContract(researchTitleResult, {
@@ -661,8 +669,8 @@ function buildPrompt({
     `Preferred tone: ${preferredTone || "(agent decides)"}`,
     `Target article length including spaces: about ${targetArticleLength} Korean characters`,
     "- Tone priority: explicit Preferred tone > Writer Contract tone > default human Naver Blog voice. If Preferred tone conflicts with default style rules, follow Preferred tone while preserving factual accuracy, safety, and title/body promise.",
-    articlePromptText ? "User selected article prompt file instructions:" : "",
-    articlePromptText ? articlePromptText : "",
+    resolvedArticlePromptText ? "Category-specific article prompt instructions:" : "",
+    resolvedArticlePromptText ? resolvedArticlePromptText : "",
     usesArticlePromptMode ? "" : "",
     usesArticlePromptMode ? "App execution override for the selected article prompt file:" : "",
     usesArticlePromptMode ? "- The selected article prompt file is the primary writing standard and replaces the default app style/structure rules, except for this app's JSON output shape, source-safety boundaries, selected keyword/title routing, and [SECTION - ...] marker conversion." : "",
@@ -673,8 +681,8 @@ function buildPrompt({
     usesArticlePromptMode ? "- If the selected prompt file asks for more sources than the app provides, use only the app-provided search candidates and do not fail solely because fewer than that source count is available." : "",
     usesArticlePromptMode ? "- Convert the prompt file's stage-3 subheadings into standalone article markers exactly like [SECTION - 소제목]." : "",
     usesArticlePromptMode ? "- Keep the final JSON shape required by this app even when the selected prompt file describes a conversational output format." : "",
-    imagePromptText ? "User selected image prompt file instructions:" : "",
-    imagePromptText ? imagePromptText : "",
+    resolvedImagePromptText ? "Category-specific image prompt instructions:" : "",
+    resolvedImagePromptText ? resolvedImagePromptText : "",
     `Freshness level: ${freshnessLevel || "auto"}`,
     researchTitleResult ? `Research/Title selected title: ${researchTitleResult.finalTitle || researchTitleResult.selectedTitle || ""}` : "",
     `Current writing date: ${currentDateLabel || new Date().toISOString().slice(0, 10)}`,
@@ -782,6 +790,8 @@ function buildPrompt({
     "- Structure the article into readable sections when the topic naturally has steps, criteria, examples, pros/cons, or enumerated points.",
     "- For each section heading, put a standalone marker line in article exactly like [SECTION - 소제목].",
     "- Every section marker must start with \"[SECTION - \" and end with \"]\" on the same standalone line. Never omit the closing bracket.",
+    `- Create at least ${bodyImageLimit} section headings when ${bodyImageLimit} images are requested.`,
+    `- Place each [IMAGE INSERT - n] marker immediately below its matching [SECTION - 소제목] line, before that section's first paragraph. Never place an image marker after the section paragraph.`,
     "- If you would write 첫째/둘째/첫 번째/두 번째 as an item label, convert that item label into a [SECTION - ...] marker instead of keeping it inside a paragraph.",
     "- Section marker text must be concise, natural Korean, reader-facing, and suitable as a Naver Blog section heading. Avoid headings that describe research/source process instead of reader value.",
     "- For events, job fairs, exhibitions, contests, applications, recruitment notices, sales, deadlines, or any date-bound information: exclude anything whose event date, application period, deadline, or relevant operating period is already past relative to the Current writing date.",
@@ -790,12 +800,8 @@ function buildPrompt({
     bodyImageLimit > 0
       ? "- Insert image markers exactly as [IMAGE INSERT - 1], [IMAGE INSERT - 2], etc where images belong."
       : "- Do not insert any [IMAGE INSERT - n] markers in the article body.",
-    bodyImageLimit > 0
-      ? `- Prepare no more than ${bodyImageLimit} body image prompts. Put each prompt in bodyImages[].prompt, keep bodyImages[].path empty, and do not generate actual image files.`
-      : "- Do not generate body images. Set bodyImages to an empty array.",
-    includeTitleImage
-      ? "- Prepare one title image prompt in titleImagePrompt and keep titleImagePath empty. Do not generate an actual title image file."
-      : "- Do not prepare a title image. Set titleImagePath and titleImagePrompt to empty strings.",
+    `- Prepare exactly ${bodyImageLimit} image prompts in bodyImages[].prompt with sequence numbers 1 through ${bodyImageLimit}. Keep every path empty and place matching [IMAGE INSERT - n] markers in the article.`,
+    "- Do not prepare a separate title image. Set titleImagePath and titleImagePrompt to empty strings. If the category image prompt asks for a main thumbnail, create it as bodyImages sequence 1.",
     usesImages
       ? "- Actual image generation is handled later by Image Worker. Writer Agent must only provide grounded prompts and marker positions."
       : "- Since no images were requested, do not perform an image prompt or image-generation stage and do not write image-generation notes.",
@@ -807,10 +813,13 @@ function buildPrompt({
     includeTitleImage ? "- Title image prompts may request short Korean headline text, key verified numbers, period, benefit, or condition text when it helps summarize the whole article. Keep text short and do not invent unverified facts." : "",
     bodyImageLimit > 0 ? "- Each body image must summarize the nearby section where its [IMAGE INSERT - n] marker appears. Use concrete nouns, named products/people/places/events, and the section's key comparison or process." : "",
     usesImages ? "- When writing image prompts, include the article title or section heading context, 2-4 concrete visual elements from the extracted facts, and a clear Korean blog editorial style. Do not invent facts that are not in the article." : "",
-    usesImages && imagePromptText ? "- Apply the user selected image prompt file instructions to titleImagePrompt and bodyImages[].prompt unless they conflict with verified facts, no-text rules, or the article context." : "",
-    bodyImageLimit > 0 ? "- Body image prompts must keep the existing no-text policy: avoid readable text, Korean paragraphs, long labels, UI copy, and text-heavy charts. Prefer visual composition, objects, scenes, icons, and simple non-textual cues." : "",
+    usesCustomImagePrompt ? "- The category-specific image prompt is the primary visual standard. Follow its text, infographic, layout, and typography rules unless they conflict with verified article facts or the selected image count/aspect ratio." : "",
+    !usesCustomImagePrompt ? "- No category image prompt is configured. Create suitable default editorial image prompts from the article and nearby sections." : "",
+    !usesCustomImagePrompt ? "- Default body images should avoid long readable paragraphs and text-heavy charts; prefer clear editorial visuals and concise labels only when useful." : "",
     usesImages ? "- Do not return an image directory path as an image path. Each path must include the concrete image filename such as .png, .jpg, .jpeg, or .webp." : "",
     usesImages ? "- Do not call image generation tools. Do not spend time trying PowerShell, shell copy, or Node copy workarounds for images." : "",
+    "- Return exactly 10 useful Korean SEO tags in tags[].",
+    "- End the article field with the same 10 tags on one final line in #태그 format. Do not place any text after the hashtag line.",
     "- For automatic/current-information topics, avoid generic how-to guide titles such as '~찾는 법', '~확인법', '~가이드' unless the user explicitly asked for a how-to guide.",
     "- Choose a concrete current angle that fits the category and keyword. Examples: for news categories, cover a specific recent issue or trend; for job categories, cover currently valid openings/programs/events; for tech categories, cover a specific product, model, policy, release, or market change.",
     "- Do not force every category into opportunities, programs, or events. Let the category and source candidates decide the article angle.",
@@ -835,13 +844,14 @@ function buildResearchTitlePrompt({
   publishPurpose = "",
   preferredTone = "",
   articlePromptFilePath = "",
+  articlePromptText = "",
   freshnessLevel = "auto",
   keywordLanes = [],
   recommendedKeywordLanes = []
 }) {
   const resultPath = path.join(jobDir, "research-title-result.json");
   const hasSearchCandidates = Array.isArray(searchResults) && searchResults.length > 0;
-  const usesArticlePromptMode = hasArticlePromptMode(articlePromptFilePath);
+  const usesArticlePromptMode = hasArticlePromptMode(articlePromptFilePath, articlePromptText);
   const laneList = Array.isArray(keywordLanes) ? keywordLanes : [];
   const recommendedLaneList = Array.isArray(recommendedKeywordLanes) ? recommendedKeywordLanes : [];
   return [
@@ -952,9 +962,12 @@ function buildMainReviewPrompt({
   researchTitleResult,
   writerResult,
   finalTitle,
-  preferredTone = ""
+  preferredTone = "",
+  articlePromptFilePath = "",
+  articlePromptText = ""
 }) {
   const resultPath = path.join(jobDir, "main-review-result.json");
+  const articlePromptMode = hasArticlePromptMode(articlePromptFilePath, articlePromptText);
   const writerContract = buildWriterContract(researchTitleResult, {
     topic,
     keyword,
@@ -975,6 +988,7 @@ function buildMainReviewPrompt({
     `Current writing date: ${currentDateLabel || new Date().toISOString().slice(0, 10)}`,
     `Research/Title final title: ${finalTitle}`,
     `Preferred tone: ${preferredTone || "(agent decides)"}`,
+    `Article prompt mode: ${articlePromptMode ? "enabled" : "disabled"}`,
     `Output JSON path: ${resultPath}`,
     "",
     "Writer contract used for review:",
@@ -1001,6 +1015,10 @@ function buildMainReviewPrompt({
     "- The body must directly answer the question or promise implied by the title.",
     "",
     "Factuality review:",
+    articlePromptMode ? "- Article prompt mode override: treat the user-selected short-content title/direct topic as an accepted factual premise for this workflow." : "",
+    articlePromptMode ? "- Do not investigate, challenge, or BLOCK the core event merely because usable sources, direct candidates, dates, comparison data, or official confirmation are absent." : "",
+    articlePromptMode ? "- In article prompt mode, factualityPass and sourceUsePass must be true. Do not include missing-source or unverified-core-event complaints in failureReason, issues, revisionInstructions, or notes." : "",
+    articlePromptMode ? "- Still reject facts that contradict the user topic, fabricated precise numbers not present in the topic/article prompt, or dangerous guaranteed claims." : "",
     "- For fact-based topics, only confirmed facts from the Research/Title handoff and usable sources may be used.",
     "- Conditions, dates, amounts, targets, application methods, prices, schedules, official claims, statistics, and policy details must not be invented.",
     "- If a confirmation 기준일/current 기준 is needed for 접수중, 모집중, 신청 가능, 현재 운영, current availability, prices, schedules, deadlines, policy/support conditions, or official announcements but absent, require cautious wording instead of definitive claims.",
@@ -1008,6 +1026,7 @@ function buildMainReviewPrompt({
     "- Facts and interpretation must be distinguishable. Uncertain items must not become definite claims.",
     "",
     "Search/source-use review:",
+    articlePromptMode ? "- Article prompt mode does not require search/source evidence. Empty usableSources and skipped sourceQuality are valid and must not reduce publishability." : "",
     "- The article must not copy search-result sentences, Naver top-post structure, source titles, or source paragraph order.",
     "- Search results may be used as signals, facts, reader-interest clues, and gap analysis only. They must not be pasted together into a new article.",
     "- Do not return BLOCK solely because official sources are missing when directly related blog/web candidates exist and the article uses cautious aggregation wording.",
@@ -1018,6 +1037,8 @@ function buildMainReviewPrompt({
     "- Do not reject a stylistic choice solely for differing from the default human-blog voice when explicit Preferred tone requested that style and the article remains reader-facing and accurate.",
     "- Keyword repetition must not be excessive.",
     "- [SECTION - ...] markers are intentional app markers for Naver section headings. They are allowed in the Writer Agent article field and must not be treated as exposed internal text or a body quality failure.",
+    "- Every [IMAGE INSERT - n] marker must appear immediately after a [SECTION - ...] marker and before the section paragraph.",
+    "- The article must end with exactly 10 hashtag tokens on one final line.",
     "- The article must not expose internal words such as source candidate, source quality, prompt, JSON, agent, report, handoff, or review as reader-facing text.",
     "- The first section and opening paragraph must explain the article topic itself, not how the agent verified sources. Return REVISION if the lead reads like a research report or source-verification memo.",
     "- Return REVISION if the opening explains category exclusions, defends what the article is not, or copies category publishing direction instead of starting with the selected subject and reader value.",
@@ -1031,7 +1052,9 @@ function buildMainReviewPrompt({
     "Final verdict rules:",
     "- Return PASS only if every review area can be published as-is.",
     "- Return REVISION if the issue is fixable by rewriting without new research, but do not rewrite it here.",
-    "- Return BLOCK if directly related candidates are absent, sources conflict beyond cautious aggregation, the article is unsupported, the direct topic changed, or publishing could mislead readers.",
+    articlePromptMode
+      ? "- In article prompt mode, never return BLOCK or REVISION solely for absent candidates, absent official sources, or inability to independently verify the user-selected core event."
+      : "- Return BLOCK if directly related candidates are absent, sources conflict beyond cautious aggregation, the article is unsupported, the direct topic changed, or publishing could mislead readers.",
     "",
     "Research/Title Agent result:",
     JSON.stringify(researchTitleResult || {}, null, 2),
@@ -1087,7 +1110,7 @@ function buildImageWorkerPrompt({
   runtimeRoot,
   includeTitleImage = true,
   imageAspectRatio = DEFAULT_IMAGE_ASPECT_RATIO,
-  maxBodyImages = 2,
+  maxBodyImages = 5,
   writerResult,
   finalTitle,
   accountImageStylePrompt = ""
@@ -1095,7 +1118,7 @@ function buildImageWorkerPrompt({
   const resultPath = path.join(jobDir, "image-worker-result.json");
   const imageDir = path.join(runtimeRoot || path.dirname(path.dirname(jobDir)), "image");
   const selectedImageAspectRatio = normalizeImageAspectRatio(imageAspectRatio);
-  const bodyImageLimit = Math.min(10, Math.max(0, Number.isFinite(Number(maxBodyImages)) ? Number(maxBodyImages) : 2));
+  const bodyImageLimit = [1, 3, 5, 7].includes(Number(maxBodyImages)) ? Number(maxBodyImages) : 5;
   fs.mkdirSync(imageDir, { recursive: true });
   return [
     "You are the Image Worker for a Korean Naver Blog automation app.",
@@ -1110,8 +1133,8 @@ function buildImageWorkerPrompt({
     "- BLOGAUTO_PROGRESS: save",
     "",
     "Image generation scope:",
-    includeTitleImage ? "- Generate one title image when titleImagePrompt is available." : "- Do not generate a title image.",
-    bodyImageLimit > 0 ? `- Generate no more than ${bodyImageLimit} body images from bodyImages[].prompt.` : "- Do not generate body images.",
+    "- Do not generate a separate title image.",
+    `- Generate exactly ${bodyImageLimit} images from bodyImages[].prompt when all prompts are available.`,
     `- Requested image aspect ratio: ${selectedImageAspectRatio}.`,
     "- Generate every requested image in the requested aspect ratio. Keep the selected orientation and do not substitute a different ratio unless the image tool cannot support it.",
     "- Do not run shell, PowerShell, Node, Python, Copy-Item, cp, move, or file-copy commands for images.",
@@ -1126,15 +1149,10 @@ function buildImageWorkerPrompt({
     accountImageStylePrompt ? "- Apply this account-specific visual style prompt unless it conflicts with factual accuracy, no-text rules, or the article context:" : "",
     accountImageStylePrompt ? accountImageStylePrompt : "",
     "",
-    "Title image policy:",
-    includeTitleImage ? "- The title image is the representative thumbnail for the whole article, not a generic background." : "- Title image generation is disabled.",
-    includeTitleImage ? "- Korean text is allowed in the title image when it helps summarize the article. Use only short headline/key-point text, verified numbers, periods, benefits, or conditions from the article." : "",
-    includeTitleImage ? "- Do not add long Korean paragraphs, fake official marks, unverified amounts, unverified dates, or labels that are not supported by the article." : "",
-    includeTitleImage ? "- A card-style Korean blog thumbnail with a clear headline, central subject, and 2-4 visual fact cues is acceptable." : "",
-    "",
-    "Body image policy:",
-    bodyImageLimit > 0 ? "- Body images keep the existing policy: avoid readable Korean text, paragraphs, long labels, UI copy, and text-heavy charts." : "- Body image generation is disabled.",
-    bodyImageLimit > 0 ? "- Body images should visually support the nearby section with objects, scenes, icons, or process cues." : "",
+    "Image policy:",
+    "- Treat bodyImages sequence 1 as the lead/main image when its prompt requests a thumbnail or cover.",
+    "- Follow each Writer Agent prompt exactly, including Korean infographic text and layout instructions.",
+    "- Never invent numbers, logos, dates, or facts absent from the article.",
     "",
     "Writer Agent image handoff:",
     JSON.stringify({
@@ -1154,7 +1172,7 @@ function buildImageWorkerPrompt({
 }
 
 function mergeImageWorkerResult(writerResult, imageResult, options = {}) {
-  const bodyImageLimit = Math.min(10, Math.max(0, Number.isFinite(Number(options.maxBodyImages)) ? Number(options.maxBodyImages) : 2));
+  const bodyImageLimit = [1, 3, 5, 7].includes(Number(options.maxBodyImages)) ? Number(options.maxBodyImages) : 5;
   const writerBodyImages = Array.isArray(writerResult?.bodyImages) ? writerResult.bodyImages : [];
   const generatedBodyImages = Array.isArray(imageResult?.bodyImages) ? imageResult.bodyImages : [];
   const mergedBodyImages = generatedBodyImages
@@ -1240,7 +1258,7 @@ function codexTaskTimeoutMs(agent = "") {
   const raw = Number(process.env.BLOGAUTO_CODEX_TASK_TIMEOUT_MS || 0);
   if (Number.isFinite(raw) && raw >= 30000) return raw;
   if (agent === "research") return 180000;
-  if (agent === "image" || agent === "imageStyle") return 300000;
+  if (agent === "image" || agent === "imageStyle") return 600000;
   return 180000;
 }
 
@@ -1533,6 +1551,45 @@ function mainReviewPassIssueReason(mainReviewResult) {
     return `Main Agent returned PASS with a failure reason: ${failureReason}`;
   }
   return "";
+}
+
+function applyArticlePromptMainReviewPolicy(mainReviewResult, enabled = false) {
+  if (!enabled || !mainReviewResult || typeof mainReviewResult !== "object") {
+    return mainReviewResult;
+  }
+  const sourceComplaint = /출처|근거|검색\s*후보|직접\s*관련\s*후보|공식\s*(자료|확인|출처)|확인할\s*(출처|자료)|사실\s*확인|source|candidate|unsupported|verify/i;
+  const filtered = (values) => (Array.isArray(values) ? values : [])
+    .filter((value) => !sourceComplaint.test(String(value || "")));
+  const next = {
+    ...mainReviewResult,
+    factualityPass: true,
+    sourceUsePass: true,
+    issues: filtered(mainReviewResult.issues),
+    revisionInstructions: filtered(mainReviewResult.revisionInstructions),
+    notes: filtered(mainReviewResult.notes)
+  };
+  const otherRequiredFields = [
+    "titleReviewPass",
+    "articleAnswersTitle",
+    "topicPreserved",
+    "currentBridgePass",
+    "bodyQualityPass",
+    "riskExpressionPass",
+    "writerContractPass",
+    "readerFacingArticlePass",
+    "noResearchProcessNarrationPass"
+  ];
+  const otherFailures = otherRequiredFields.filter((field) => next[field] !== true);
+  const failureReasonIsSourceOnly = sourceComplaint.test(String(next.failureReason || ""));
+  if (otherFailures.length === 0 && (failureReasonIsSourceOnly || next.issues.length === 0)) {
+    next.status = "PASS";
+    next.failureReason = "";
+    next.publishable = true;
+  } else if (failureReasonIsSourceOnly) {
+    next.failureReason = next.issues[0]
+      || "출처 검증 외의 글 품질 항목이 발행 기준을 통과하지 못했습니다.";
+  }
+  return next;
 }
 
 async function runCodexTask({
@@ -2067,7 +2124,7 @@ async function runCodexGeneration(options, log = () => {}) {
 
   let researchStatus = String(researchResult.status || "").toUpperCase();
   let requestedSearchNeed = String(researchResult.searchNeed || "").toLowerCase();
-  const articlePromptModeSkipsSearch = hasArticlePromptMode(effectiveOptions.articlePromptFilePath);
+  const articlePromptModeSkipsSearch = hasArticlePromptMode(effectiveOptions.articlePromptFilePath, effectiveOptions.articlePromptText);
   if (articlePromptModeSkipsSearch && ["light", "normal", "strict"].includes(requestedSearchNeed)) {
     log("Article prompt mode: app search candidate collection skipped.", "info", "research");
     requestedSearchNeed = "skip";
@@ -2283,7 +2340,7 @@ async function runCodexGeneration(options, log = () => {}) {
       tokenUsage: tokenUsageSnapshot()
     };
   }
-  const articlePromptMode = hasArticlePromptMode(effectiveOptions.articlePromptFilePath);
+  const articlePromptMode = hasArticlePromptMode(effectiveOptions.articlePromptFilePath, effectiveOptions.articlePromptText);
   const maxReviewAttempts = 1;
   let writerResult = null;
   let mainReviewResult = null;
@@ -2361,6 +2418,7 @@ async function runCodexGeneration(options, log = () => {}) {
       agentTokenOffset: agentTokenTotals.main,
       agent: "main"
     });
+    mainReviewResult = applyArticlePromptMainReviewPolicy(mainReviewResult, articlePromptMode);
     totalTokens += Number(mainReviewResult.tokenUsage?.total || 0);
     totalGrossTokens += Number(mainReviewResult.tokenUsage?.grossTotal || mainReviewResult.tokenUsage?.total || 0);
     agentTokenTotals.main += Number(mainReviewResult.tokenUsage?.total || 0);
@@ -2411,7 +2469,7 @@ async function runCodexGeneration(options, log = () => {}) {
     ...writerResult,
     title: finalTitle || String(writerResult.title || "").trim()
   };
-  const bodyImageLimit = Math.min(10, Math.max(0, Number.isFinite(Number(effectiveOptions.maxBodyImages)) ? Number(effectiveOptions.maxBodyImages) : 2));
+  const bodyImageLimit = [1, 3, 5, 7].includes(Number(effectiveOptions.maxBodyImages)) ? Number(effectiveOptions.maxBodyImages) : 5;
   const usesImages = effectiveOptions.includeTitleImage !== false || bodyImageLimit > 0;
   if (usesImages) {
     log("Image Worker 이미지 생성 시작", "info", "main");

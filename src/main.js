@@ -189,15 +189,15 @@ function sanitizeNaverTag(value) {
 
 function buildTags(topic, keyword, articleTags) {
   const raw = [
+    ...(Array.isArray(articleTags) ? articleTags : []),
     topic,
-    keyword,
-    ...(Array.isArray(articleTags) ? articleTags : [])
+    keyword
   ]
     .flatMap((item) => String(item || "").split(/[,\n#]+/))
     .map(sanitizeNaverTag)
     .filter(Boolean);
 
-  return [...new Set(raw)].slice(0, 29);
+  return [...new Set(raw)].slice(0, 10);
 }
 
 function normalizeKeywordLane(value) {
@@ -479,9 +479,9 @@ async function startJob(form) {
   const publishPrivate = publishVisibility !== "public";
   const publishScheduleMode = String(form.publishScheduleMode || "now");
   const reserveAfterHours = Number(form.reserveAfterHours || 0);
-  const includeTitleImage = form.includeTitleImage !== false;
+  const includeTitleImage = false;
   const imageAspectRatio = normalizeImageAspectRatio(form.imageAspectRatio || settings.imageAspectRatio);
-  const maxBodyImages = Math.min(10, Math.max(0, Number.isFinite(Number(form.maxBodyImages)) ? Number(form.maxBodyImages) : 2));
+  const maxBodyImages = [1, 3, 5, 7].includes(Number(form.maxBodyImages)) ? Number(form.maxBodyImages) : 5;
   const breakSentencesInBody = form.breakSentencesInBody !== false;
   const agentModels = form.agentModels || settings.agentModels || {};
   const shouldUploadToNaver = form.publishAfterGenerate === true || form.topicMode === "auto";
@@ -591,6 +591,7 @@ async function startJob(form) {
     publishAfterGenerate: shouldUploadToNaver,
     publishPrivate,
     topicMode: form.topicMode || "manual",
+    autoRepeatEnabled: form.autoRepeatEnabled === true,
     repeatTermMinutes: Number(form.repeatTermMinutes || 60),
     publishVisibility,
     publishScheduleMode,
@@ -656,6 +657,8 @@ async function startJob(form) {
         articleLength: form.articleLength || 1500,
         articlePromptFilePath: form.articlePromptFilePath || "",
         imagePromptFilePath: form.imagePromptFilePath || "",
+        articlePromptText: form.articlePromptText || "",
+        imagePromptText: form.imagePromptText || "",
         freshnessLevel: form.freshnessLevel || "auto",
         searchChannel: form.searchChannel || "blog",
         trustBlogAsSource: form.trustBlogAsSource === true,
@@ -1054,6 +1057,13 @@ app.whenReady().then(() => {
     });
     if (result.canceled || !result.filePaths?.length) return "";
     return result.filePaths[0];
+  });
+  ipcMain.handle("prompt:readFile", (_event, filePath) => {
+    const target = String(filePath || "").trim();
+    if (!target || !fs.existsSync(target) || !fs.statSync(target).isFile()) {
+      throw new Error("프롬프트 파일을 찾을 수 없습니다.");
+    }
+    return fs.readFileSync(target, "utf8").replace(/^\uFEFF/, "");
   });
   ipcMain.handle("shortcontents:categories", () => listShortContentCategories());
   ipcMain.handle("shortcontents:titles", (_event, categoryName) => listShortContentTitles(categoryName));

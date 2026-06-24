@@ -95,8 +95,8 @@ async function main() {
     jobDir,
     topic,
     keyword,
-    includeTitleImage: settings.includeTitleImage !== false,
-    maxBodyImages: Number.isFinite(Number(settings.maxBodyImages)) ? Number(settings.maxBodyImages) : 2,
+    includeTitleImage: false,
+    maxBodyImages: [1, 3, 5, 7].includes(Number(settings.maxBodyImages)) ? Number(settings.maxBodyImages) : 5,
     currentDateLabel: "",
     result: rawResult
   });

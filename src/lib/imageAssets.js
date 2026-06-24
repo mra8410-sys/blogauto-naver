@@ -329,6 +329,78 @@ function insertMissingImageMarkers(article, images) {
   return `${cleanArticle.slice(0, firstBreak)}\n\n${markerLines}\n\n${cleanArticle.slice(firstBreak + 2)}`;
 }
 
+function placeImageMarkersAfterSections(article, images) {
+  const sequences = (Array.isArray(images) ? images : [])
+    .map((item) => Number(item?.sequence || 0))
+    .filter((sequence) => sequence > 0);
+  if (!sequences.length) return String(article || "");
+
+  const markerPattern = /\n?\[IMAGE INSERT\s*-\s*\d+\]\n?/gi;
+  const clean = String(article || "").replace(markerPattern, "\n").replace(/\n{3,}/g, "\n\n").trim();
+  const lines = clean.split(/\r?\n/);
+  const sectionIndexes = [];
+  lines.forEach((line, index) => {
+    if (/^\[(?:SECTION|SUBTITLE)\s*-\s*.+\]$/i.test(line.trim())) {
+      sectionIndexes.push(index);
+    }
+  });
+  if (!sectionIndexes.length) {
+    return insertMissingImageMarkers(clean, images);
+  }
+
+  const markerByIndex = new Map();
+  sequences.forEach((sequence, index) => {
+    const sectionIndex = sectionIndexes[Math.min(index, sectionIndexes.length - 1)];
+    const existing = markerByIndex.get(sectionIndex) || [];
+    existing.push(`[IMAGE INSERT - ${sequence}]`);
+    markerByIndex.set(sectionIndex, existing);
+  });
+
+  const output = [];
+  lines.forEach((line, index) => {
+    output.push(line);
+    const markers = markerByIndex.get(index);
+    if (markers?.length) {
+      output.push("", ...markers.flatMap((marker) => [marker, ""]));
+    }
+  });
+  return output.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function sanitizeTag(value) {
+  return String(value || "")
+    .replace(/^#+/, "")
+    .replace(/\s+/g, "")
+    .replace(/[^\p{L}\p{N}]/gu, "")
+    .trim();
+}
+
+function normalizeTenTags(tags, topic, title) {
+  const candidates = [
+    ...(Array.isArray(tags) ? tags : []),
+    ...String(topic || "").split(/[\s,/#·:]+/),
+    ...String(title || "").split(/[\s,/#·:]+/),
+    "오늘의이슈",
+    "핵심정리",
+    "정보공유",
+    "트렌드",
+    "이슈분석",
+    "블로그정보",
+    "한눈에정리",
+    "관심주제",
+    "최신정보",
+    "생활정보"
+  ].map(sanitizeTag).filter(Boolean);
+  return [...new Set(candidates)].slice(0, 10);
+}
+
+function appendHashtagLine(article, tags) {
+  const clean = String(article || "")
+    .replace(/\n+(?:#[\p{L}\p{N}_-]+\s*){1,29}\s*$/u, "")
+    .trim();
+  return `${clean}\n\n${tags.map((tag) => `#${tag}`).join(" ")}`;
+}
+
 function escapeRegExp(value) {
   return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -387,12 +459,12 @@ function normalizeAgentResult({
   topic,
   result,
   includeTitleImage = true,
-  maxBodyImages = 2,
+  maxBodyImages = 5,
   currentDateLabel = ""
 }) {
   const title = removeCurrentDateMentions(String(result.title || "").trim(), currentDateLabel);
   let article = removeCurrentDateMentions(String(result.article || "").trim(), currentDateLabel);
-  const bodyImageLimit = Math.min(10, Math.max(0, Number.isFinite(Number(maxBodyImages)) ? Number(maxBodyImages) : 2));
+  const bodyImageLimit = [1, 3, 5, 7].includes(Number(maxBodyImages)) ? Number(maxBodyImages) : 5;
   if (!title) {
     throw new Error("Codex 결과에 제목이 없습니다.");
   }
@@ -460,11 +532,14 @@ function normalizeAgentResult({
   if (imagesRequested && bodyImages.length === 0 && !titleImagePath) {
     imageWarnings.push("생성된 이미지 파일이 없습니다.");
   }
+  article = placeImageMarkersAfterSections(article, bodyImages);
+  const normalizedTags = normalizeTenTags(result.tags, topic, title);
+  article = appendHashtagLine(article, normalizedTags);
 
   return {
     title,
     article,
-    tags: Array.isArray(result.tags) ? result.tags : [],
+    tags: normalizedTags,
     bodyImages,
     titleImagePath,
     notes: [

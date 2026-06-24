@@ -107,14 +107,17 @@ async function safeClickLocator(_page, locator, _log = () => {}, _label = "요�
     await locator.click({ delay: 120, timeout: 5000 });
   } catch (error) {
     if (/se-popup|popup|intercepts pointer events/i.test(error.message || "")) {
-      const dismissed = await dismissExistingDraftDialog(_page, _log);
-      if (dismissed) {
-        await locator.scrollIntoViewIfNeeded().catch(() => {});
+      await dismissBlockingEditorPopup(_page, _log, _label);
+      await locator.scrollIntoViewIfNeeded().catch(() => {});
+      try {
         await locator.click({ delay: 120, timeout: 5000 });
-      } else if (/se-selection/i.test(error.message || "")) {
-        await locator.click({ delay: 120, timeout: 5000, force: true });
-      } else {
-        throw error;
+      } catch (retryError) {
+        if (/se-popup|popup|intercepts pointer events|Timeout/i.test(retryError.message || "")) {
+          _log(`${_label} 앞의 편집기 팝업이 남아 있어 강제 클릭으로 재시도합니다.`, "warn");
+          await locator.click({ delay: 120, timeout: 5000, force: true });
+        } else {
+          throw retryError;
+        }
       }
     } else {
       throw error;
@@ -635,7 +638,10 @@ async function clickExactPopupButton(page, text) {
 
 function looksLikeSecurityCheck(url, bodyText) {
   const text = String(bodyText || "");
-  return /captcha|자동입력|보안\s*확인|사람입니까|로봇|비정상적인|본인\s*확인|인증번호/i.test(`${url}\n${text}`);
+  const currentUrl = String(url || "");
+  const securityUrl = /captcha|security|challenge|protect|nidlogin\.login.*mode=form/i.test(currentUrl);
+  const securityPageText = /자동입력\s*(방지|문자)|보안\s*확인\s*(페이지|절차|필요)|사람인지\s*확인|로봇이\s*아닙니다|비정상적인\s*(접근|로그인|활동)|본인\s*확인이\s*필요/i.test(text);
+  return securityUrl || securityPageText;
 }
 
 async function waitForLoginComplete(page, log, timeout = 10 * 60 * 1000) {
@@ -878,6 +884,55 @@ async function dismissExistingDraftDialog(page, log) {
   log("기존 작성 실패/임시글 안내를 취소하고 새 글 작성을 계속합니다.");
   await sleep(800);
   return true;
+}
+
+async function dismissBlockingEditorPopup(page, log = () => {}, label = "요소") {
+  if (await dismissExistingDraftDialog(page, log)) {
+    return true;
+  }
+  if (!await hasVisibleEditorPopup(page)) {
+    return false;
+  }
+
+  await page.keyboard.press("Escape").catch(() => {});
+  await sleep(250);
+  await page.keyboard.press("Escape").catch(() => {});
+  await sleep(250);
+
+  const clickVisibleDim = async (root) => {
+    const dims = root.locator(".se-popup-dim.se-popup-dim-transparent, .se-popup-dim");
+    const count = await dims.count().catch(() => 0);
+    for (let index = 0; index < count; index += 1) {
+      const dim = dims.nth(index);
+      if (!await dim.isVisible().catch(() => false)) continue;
+      const clicked = await dim
+        .click({ position: { x: 4, y: 4 }, force: true, timeout: 1500 })
+        .then(() => true)
+        .catch(() => false);
+      if (clicked) return true;
+    }
+    return false;
+  };
+
+  if (await hasVisibleEditorPopup(page)) {
+    let clicked = await clickVisibleDim(page);
+    if (!clicked) {
+      for (const frame of page.frames()) {
+        clicked = await clickVisibleDim(frame);
+        if (clicked) break;
+      }
+    }
+    if (clicked) await sleep(300);
+  }
+
+  const dismissed = !await hasVisibleEditorPopup(page);
+  log(
+    dismissed
+      ? `${label} 클릭을 막던 편집기 팝업을 닫았습니다.`
+      : `${label} 클릭을 막던 편집기 팝업이 남아 있어 버튼 직접 클릭을 시도합니다.`,
+    dismissed ? "info" : "warn"
+  );
+  return dismissed;
 }
 
 async function selectNativeCategory(page, category) {
@@ -1217,10 +1272,11 @@ async function waitForPostWriteTitle(page, selectors, options, postWriteUrl, log
   throw new Error("블로그 글쓰기 편집기를 제한 시간 안에 찾지 못했습니다. Naver Editor DOM notes 확인이 필요합니다.");
 }
 
-async function insertImageByButton(page, selector, filePath) {
+async function insertImageByButton(page, selector, filePath, log = () => {}) {
+  await dismissBlockingEditorPopup(page, log, "이미지 버튼");
   const chooserPromise = page.waitForEvent("filechooser", { timeout: 10000 });
   const button = await findVisibleLocator(page, selector, 20000);
-  await safeClickLocator(page, button);
+  await clickLocatorResilient(page, button, log, "이미지 버튼");
   const chooser = await chooserPromise;
   await chooser.setFiles(filePath);
   await sleep(1800);
@@ -1730,7 +1786,7 @@ async function insertArticleWithImages(page, selectors, article, bodyImages, opt
 
     await page.keyboard.press("Enter");
     await page.keyboard.press("Enter");
-    await insertImageByButton(page, selectors.imageButton, image.path);
+    await insertImageByButton(page, selectors.imageButton, image.path, log);
     await clearAiMarkForLatestImage(page, log, `본문 이미지 ${block.sequence}`);
     await page.keyboard.press("Enter");
     await page.keyboard.press("Enter");
@@ -2180,7 +2236,7 @@ async function publishToNaver(options) {
         throw new Error("타이틀 이미지 삽입용 imageButton selector가 필요합니다.");
       }
       await assertNaverSessionActive(page, selectors, log, "타이틀 이미지 삽입 전");
-      await insertImageByButton(page, selectors.imageButton, options.titleImagePath);
+      await insertImageByButton(page, selectors.imageButton, options.titleImagePath, log);
       await clearAiMarkForLatestImage(page, log, "타이틀 이미지");
       log("타이틀 이미지 삽입 완료");
       await assertNaverSessionActive(page, selectors, log, "타이틀 이미지 삽입");

@@ -1,0 +1,139 @@
+Create Korean finance blog infographics based on the article below.
+
+Article topic:
+[글 전체 주제]
+
+Article text:
+[본문 전체 붙여넣기]
+
+Output images:
+1. Main thumbnail infographic
+2. Section infographic for each major subsection
+3. Final scenario and strategy infographic
+
+Style:
+Professional Korean finance/real estate blog infographic.
+Premium financial research report style, clean dashboard layout.
+Trustworthy, data-driven, elegant, easy to scan.
+
+Canvas:
+16:9 horizontal.
+Optimized for Korean blog thumbnails.
+
+Common design:
+- White/light gray dashboard background
+- Navy: structure/trust
+- Blue: analysis, policy, rates, macro
+- Green: growth, opportunity, rebound
+- Red: risk, decline, warning
+- Gold: key numbers, conclusions
+- Clean flat vector icons only
+- Use arrows, badges, checklists, line charts, summary boxes
+- Avoid clutter and decoration
+
+Typography:
+Clean Korean sans-serif like Pretendard or Nanum Gothic.
+Korean text must be sharp, accurate, readable.
+Use short Korean keywords only.
+No long sentences inside images.
+
+Icon style:
+Use premium vector icons: bank, stock chart, candlestick chart, interest rate, Korean won, calculator, document, apartment, location pin, company building, investor, policy report, warning triangle, arrows, checklist, map, loan, tax, supply-demand chart.
+
+Main thumbnail:
+Create one strong cover image for the whole article.
+
+Layout:
+- Top center title: "[메인 제목]"
+- Subtitle: "[짧은 부제목]"
+- Center: core variable relationship diagram
+- Left: key market signals
+- Right: risks and opportunities
+- Bottom: line chart, checklist, summary box
+
+Required labels:
+"핵심 변수"
+"기회 요인"
+"리스크"
+"투자 포인트"
+"시장 흐름"
+
+Mood:
+High-end Korean economy blog thumbnail.
+Expert report style, but easy to understand.
+
+Section infographics:
+Create one separate infographic for each major subsection.
+
+Section layout:
+- Top: bold Korean section title
+- Middle left: 3 key bullet points
+- Middle right: diagram, comparison chart, flow chart, or cause-effect arrows
+- Bottom: one-line summary box
+
+Required labels:
+"핵심"
+"변수"
+"영향"
+"체크"
+"요약"
+
+Topic icons:
+Stocks: candlestick chart, company icon, earnings report, investor, valuation chart.
+Real estate: apartment, location pin, loan, interest rate, land map, supply-demand chart.
+Policy/rates/tax/macro: bank, central bank, percent icon, policy document, arrow flow.
+Risk: red warning accents, downside chart, alert icon, risk checklist.
+Opportunity: green accents, upward chart, opportunity badge, positive checklist.
+
+Final scenario infographic:
+Title: "향후 시나리오와 대응 전략"
+
+Layout:
+3 clear columns.
+
+Column 1:
+Title: "상승 시나리오"
+Color: Green
+Visuals: upward arrow, growth chart, opportunity icon
+Content:
+- 상승 조건
+- 긍정 변수
+- 대응 전략
+
+Column 2:
+Title: "중립 시나리오"
+Color: Blue
+Visuals: sideways chart, checklist, analysis icon
+Content:
+- 횡보 조건
+- 확인 변수
+- 대응 전략
+
+Column 3:
+Title: "하락 시나리오"
+Color: Red
+Visuals: downward arrow, warning icon, risk chart
+Content:
+- 하락 조건
+- 위험 변수
+- 대응 전략
+
+Bottom:
+Gold conclusion box:
+"핵심 전략: [글 내용의 방향으로 한 문장 결론]"
+
+Text rules:
+Use concise Korean keywords only.
+No long paragraphs.
+No random English.
+No fake numbers unless in article.
+No fake logos.
+No broken Korean letters.
+No tiny unreadable text.
+No childish cartoon style.
+No messy handwriting.
+
+Important:
+Extract key message, section titles, risks, opportunities, variables, and strategy from the article.
+If information is missing, summarize logically without inventing numbers.
+Make all images feel like one consistent visual series.

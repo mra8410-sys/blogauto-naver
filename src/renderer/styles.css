@@ -295,6 +295,35 @@ h2 {
   white-space: nowrap;
 }
 
+.category-prompt-editor {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 10px;
+}
+
+.prompt-editor-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.prompt-editor-head > div {
+  display: grid;
+  gap: 3px;
+}
+
+.category-prompt-editor textarea {
+  min-height: 150px;
+  resize: vertical;
+  font-family: Consolas, "Noto Sans KR", sans-serif;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .legacy-overlap-control {
   display: none !important;
 }
@@ -787,6 +816,17 @@ textarea {
   align-items: center;
   gap: 8px;
   color: var(--text);
+}
+
+.repeat-term-control {
+  display: grid;
+  grid-template-columns: auto minmax(120px, 1fr);
+  gap: 8px;
+  align-items: end;
+}
+
+.repeat-term-control > label {
+  margin: 0;
 }
 
 .check-row input {

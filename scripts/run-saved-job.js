@@ -98,6 +98,7 @@ async function main() {
   ensureRuntimeFiles(runtimeRoot);
   const settings = readSettings(runtimeRoot);
   const { account, category, keyword } = pickAccountAndCategory(runtimeRoot, settings);
+  const promptProfile = account?.shortContentPromptProfiles?.[account?.shortContentCategory || ""] || {};
 
   let topic = String(settings.topic || "").trim();
   const naverId = String(account?.naverId || settings.naverId || "").trim();
@@ -140,9 +141,13 @@ async function main() {
     topicMode: settings.topicMode || "manual",
     searchResults: [],
     currentDateLabel,
-    includeTitleImage: settings.includeTitleImage !== false,
+    includeTitleImage: false,
     imageAspectRatio: normalizeImageAspectRatio(settings.imageAspectRatio),
-    maxBodyImages: Number.isFinite(Number(settings.maxBodyImages)) ? Number(settings.maxBodyImages) : 2,
+    maxBodyImages: [1, 3, 5, 7].includes(Number(settings.maxBodyImages)) ? Number(settings.maxBodyImages) : 5,
+    articlePromptFilePath: promptProfile.articlePromptFilePath || settings.articlePromptFilePath || "",
+    imagePromptFilePath: promptProfile.imagePromptFilePath || settings.imagePromptFilePath || "",
+    articlePromptText: promptProfile.articlePromptText || "",
+    imagePromptText: promptProfile.imagePromptText || "",
     sourceQuality: { status: "not_requested" },
     historyTitles: titleHistory.map((item) => item.title),
     onTokenUsage: (usage) => {
@@ -203,8 +208,8 @@ async function main() {
     jobDir,
     topic,
     keyword,
-    includeTitleImage: settings.includeTitleImage !== false,
-    maxBodyImages: Number.isFinite(Number(settings.maxBodyImages)) ? Number(settings.maxBodyImages) : 2,
+    includeTitleImage: false,
+    maxBodyImages: [1, 3, 5, 7].includes(Number(settings.maxBodyImages)) ? Number(settings.maxBodyImages) : 5,
     currentDateLabel,
     result: codexResult
   });
