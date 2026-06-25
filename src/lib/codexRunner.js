@@ -909,6 +909,9 @@ function buildResearchTitlePrompt({
       ? "- Generate multiple hook/curiosity Naver Blog title candidates from the short-content keyword and the selected prompt file's title strategy, then choose one finalTitle yourself. Do not ask the user to choose."
       : "- If a User direct topic exists, use Category only as the Naver blog category/routing context and use searchQueries only to support that title. Do not replace the title with a Category keyword, market keyword, or broader SEO angle.",
     usesArticlePromptMode
+      ? "- The finalTitle must be newly rewritten. It must not equal the selected short-content/news headline, including differences limited to punctuation, quotes, or spacing."
+      : "",
+    usesArticlePromptMode
       ? "- The chosen finalTitle should have curiosity and click appeal while staying fact-safe: use concrete numbers or tension only when supported, avoid buy/sell commands, guaranteed returns, and unsupported sensational claims."
       : "",
     "- If no direct topic exists or topicMode is auto, derive one narrow candidate topic from a single Keyword lane. If current facts are required, return searchNeed light/normal/strict and wait for app-provided search candidates instead of verifying facts yourself.",
@@ -1014,6 +1017,7 @@ function buildMainReviewPrompt({
     "",
     "Title review:",
     "- The final title must match the category and the Research/Title Agent finalTitle.",
+    articlePromptMode ? "- The selected short-content/news headline is reference material only. Return REVISION if the final title merely copies it, including punctuation-only or spacing-only changes." : "",
     "- If a user direct topic exists, the final title and body must preserve that topic regardless of Topic mode. Category or keyword must not replace it.",
     "- The title must include the core keyword naturally, have Naver-home clickability, avoid clickbait, and be answerable by the body.",
     "- Naver-home title review expects an editorial homepage-card title tied to the specific subject, event/action/tension, and reader promise. It must not pass only because it has a generic hook phrase.",
@@ -1444,6 +1448,19 @@ function researchRevisionReason(researchResult) {
     researchResult?.notes,
     researchResult?.uncertainItems
   ], "Research/Title Agent가 본문 작성 전 추가 확인이 필요하다고 판단했습니다.");
+}
+
+function normalizedTitleIdentity(value) {
+  return String(value || "")
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]/gu, "");
+}
+
+function isSameTitleIdentity(left, right) {
+  const normalizedLeft = normalizedTitleIdentity(left);
+  const normalizedRight = normalizedTitleIdentity(right);
+  return Boolean(normalizedLeft && normalizedRight && normalizedLeft === normalizedRight);
 }
 
 function currentBridgeIssueReason(researchResult) {
@@ -2335,6 +2352,7 @@ async function runCodexGeneration(options, log = () => {}) {
   }
 
   const finalTitle = String(researchResult.finalTitle || "").trim();
+  const articlePromptMode = hasArticlePromptMode(effectiveOptions.articlePromptFilePath, effectiveOptions.articlePromptText);
   if (!finalTitle) {
     return {
       status: "failed",
@@ -2350,7 +2368,21 @@ async function runCodexGeneration(options, log = () => {}) {
       tokenUsage: tokenUsageSnapshot()
     };
   }
-  const articlePromptMode = hasArticlePromptMode(effectiveOptions.articlePromptFilePath, effectiveOptions.articlePromptText);
+  if (articlePromptMode && isSameTitleIdentity(finalTitle, options.topic)) {
+    return {
+      status: "failed",
+      failurePhase: "research",
+      failureReason: "최종 제목이 선택된 뉴스 원문 제목과 같습니다. 프롬프트 전략에 따라 새로운 후킹 제목으로 다시 생성해야 합니다.",
+      title: "",
+      article: "",
+      tags: [],
+      bodyImages: [],
+      titleImagePath: "",
+      notes: ["뉴스 제목은 글감 참조용이며 최종 발행 제목으로 그대로 사용할 수 없습니다."],
+      researchTitleResult: researchResult,
+      tokenUsage: tokenUsageSnapshot()
+    };
+  }
   const maxReviewAttempts = 1;
   let writerResult = null;
   let mainReviewResult = null;

@@ -231,7 +231,7 @@ assertCondition(
     && sourceFiles.accountStore.content.includes("shortContentRandomSelectionCount")
     && sourceFiles.rendererApp.content.includes("function refillAutoTitleQueue")
     && sourceFiles.rendererApp.content.includes("shuffledTitles(titles)")
-    && sourceFiles.rendererApp.content.includes("await refillAutoTitleQueue(target.account)")
+    && sourceFiles.rendererApp.content.includes("await prepareShortContentQueueForSession(target.account)")
     && sourceFiles.rendererApp.content.includes("consumeAutoTitle(target.account, currentTitle)")
     && sourceFiles.rendererApp.content.includes("target.account.shortContentSelectedTitles.length === 0"),
   "repeat publishing must refill a random short-content title queue after the selected batch is exhausted"
@@ -239,7 +239,9 @@ assertCondition(
 assertCondition(
   sourceFiles.rendererApp.content.includes("const SHORT_CONTENT_RESET_GAP_MS = 8 * 60 * 60 * 1000")
     && sourceFiles.rendererApp.content.includes("async function resetStaleShortContentQueue")
-    && sourceFiles.rendererApp.content.includes("await resetStaleShortContentQueue(target.account)")
+    && sourceFiles.rendererApp.content.includes("async function prepareShortContentQueueForSession")
+    && sourceFiles.rendererApp.content.includes("const reset = await resetStaleShortContentQueue(account)")
+    && sourceFiles.rendererApp.content.includes("await prepareShortContentQueueForSession(currentAccount || account)")
     && !sourceFiles.main.content.includes("resetShortContentSelectedTitles(getRuntimeRoot(), startupSettings)"),
   "selected short-content title queues must reset after an eight-hour completed-article gap"
 );
@@ -270,11 +272,13 @@ assertCondition(
   "news feed must combine 5 personalized Naver economic headlines and 10 Daum Finance most-viewed titles"
 );
 assertCondition(
-  sourceFiles.rendererApp.content.includes("reason: \"앱 새 세션 시작\"")
-    && sourceFiles.rendererApp.content.includes("reason: \"계정 세션 시작\"")
+  sourceFiles.rendererApp.content.includes("await prepareShortContentQueueForSession(account)")
+    && sourceFiles.rendererApp.content.includes("await prepareShortContentQueueForSession(currentAccount || account)")
+    && sourceFiles.rendererApp.content.includes("renderSelectedTitleList();")
+    && sourceFiles.rendererApp.content.includes("setSelectedTitleText(\"후킹 제목 생성 중\")")
     && sourceFiles.rendererApp.content.includes("선택 제목 목록을 모두 작성해 경제 뉴스를 다시 검색합니다.")
     && !sourceFiles.rendererApp.content.includes("refreshShortContentsForCurrentAccount"),
-  "news titles must refresh only for a new app/account session and when the repeat title queue is exhausted"
+  "new sessions must prepare and display a random title queue before writing"
 );
 assertCondition(
   sourceFiles.codexRunner.content.includes("Never write first-person investment, purchase, profit/loss")
@@ -283,6 +287,19 @@ assertCondition(
     && sourceFiles.codexRunner.content.includes("do not enforce article-prompt instructions that prohibit exaggerated")
     && sourceFiles.codexRunner.content.includes("When the only concern is tone strength or decisiveness, set riskExpressionPass to true"),
   "writer and main review must prevent fabricated experience and content drift while allowing strong wording"
+);
+assertCondition(
+  sourceFiles.codexRunner.content.includes("function isSameTitleIdentity")
+    && sourceFiles.codexRunner.content.includes("articlePromptMode && isSameTitleIdentity(finalTitle, options.topic)")
+    && sourceFiles.codexRunner.content.includes("The finalTitle must be newly rewritten"),
+  "article prompt mode must reject a final title identical to the selected news headline"
+);
+assertCondition(
+  sourceFiles.rendererApp.content.includes("setSelectedTitleText(\"후킹 제목 생성 중\")")
+    && !sourceFiles.rendererApp.content.includes("setSelectedTitleText(currentTitle)")
+    && sourceFiles.rendererApp.content.includes("window.blogAuto.onSelectedTitle")
+    && sourceFiles.rendererApp.content.includes("if (payload.title) setSelectedTitleText(payload.title)"),
+  "the generated title field must update only from the Research/Title result, not from the news seed"
 );
 assertCondition(
   sourceFiles.rendererIndex.content.includes("id=\"maxBodyImages\"")

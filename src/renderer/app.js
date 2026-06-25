@@ -283,11 +283,7 @@ async function checkAccountSession(account, options = {}) {
       renderAccounts();
       setRunState("generated", "세션 정상");
       const verifiedAccountId = currentAccount?.id || account.id || "";
-      await loadNewsTitles({
-        account: currentAccount || account,
-        preserveSelected: true,
-        reason: "계정 세션 시작"
-      });
+      await prepareShortContentQueueForSession(currentAccount || account);
       if (resumeAuto && state.autoRunning && state.autoWaitingSessionAccountId === verifiedAccountId) {
         addLog({
           level: "info",
@@ -809,8 +805,24 @@ function firstAutoTargetForAccount(accountId) {
   return getAutoTargets().find((target) => String(target?.account?.id || "") === id) || null;
 }
 
+function applyAccountStore(nextStore = {}) {
+  const currentAccounts = new Map(
+    (Array.isArray(state.accountStore?.accounts) ? state.accountStore.accounts : [])
+      .map((account) => [String(account?.id || ""), account])
+  );
+  const nextAccounts = (Array.isArray(nextStore?.accounts) ? nextStore.accounts : []).map((nextAccount) => {
+    const current = currentAccounts.get(String(nextAccount?.id || ""));
+    if (!current) return nextAccount;
+    Object.assign(current, nextAccount);
+    return current;
+  });
+  state.accountStore.selectedAccountId = String(nextStore?.selectedAccountId || state.accountStore.selectedAccountId || "");
+  state.accountStore.accounts = nextAccounts;
+  return state.accountStore;
+}
+
 async function saveAccountStoreNow() {
-  state.accountStore = await window.blogAuto.saveAccountStore(state.accountStore);
+  applyAccountStore(await window.blogAuto.saveAccountStore(state.accountStore));
   renderAccounts();
   syncShortContentsFromAccount(selectedAccount());
 }
@@ -910,7 +922,10 @@ function syncShortContentsFromAccount(account = selectedAccount()) {
   renderPromptFileLabels();
   updateModeControls();
   renderShortContentTitles(state.shortContentTitles);
-  setSelectedTitleText(state.selectedShortContentTitles[0] || "아직 선정 전");
+  renderSelectedTitleList();
+  if (!state.running && !state.autoRunning) {
+    setSelectedTitleText("아직 선정 전");
+  }
 }
 
 function persistShortContentsToAccount() {
@@ -1207,8 +1222,21 @@ function shuffledTitles(titles = []) {
 async function refillAutoTitleQueue(account, options = {}) {
   if (!account) return [];
   const count = normalizeRandomSelectionCount(account.shortContentRandomSelectionCount);
-  const result = await window.blogAuto.loadNewsTitles(account.id);
-  const titles = normalizeShortContentTitleCache(result?.titles || []);
+  const cachedTitles = normalizeShortContentTitleCache(account.shortContentTitleCache || []);
+  let titles = [];
+  try {
+    const result = await window.blogAuto.loadNewsTitles(account.id);
+    titles = normalizeShortContentTitleCache(result?.titles || []);
+  } catch (error) {
+    addLog({
+      level: "warn",
+      message: `${account.label || account.naverId} 경제 뉴스 새로고침 실패로 기존 제목 목록을 사용합니다: ${error.message}`,
+      at: new Date().toISOString()
+    });
+  }
+  if (!titles.length) {
+    titles = cachedTitles;
+  }
   const selected = shuffledTitles(titles).slice(0, Math.min(count, titles.length));
   account.shortContentTitleCache = titles;
   account.shortContentSelectedTitles = selected;
@@ -1217,7 +1245,7 @@ async function refillAutoTitleQueue(account, options = {}) {
     state.shortContentTitles = titles;
     state.selectedShortContentTitles = [...selected];
     renderShortContentTitles(titles);
-    setSelectedTitleText(selected[0] || "아직 선정 전");
+    renderSelectedTitleList();
   }
   await saveAccountStoreNow();
   addLog({
@@ -1242,9 +1270,7 @@ function latestCompletedArticleForAccount(account) {
 }
 
 async function resetStaleShortContentQueue(account) {
-  if (!account || !Array.isArray(account.shortContentSelectedTitles) || !account.shortContentSelectedTitles.length) {
-    return false;
-  }
+  if (!account) return false;
   const latestArticle = latestCompletedArticleForAccount(account);
   if (!latestArticle) return false;
   const latestCreatedAt = String(latestArticle.create_at || "");
@@ -1268,6 +1294,33 @@ async function resetStaleShortContentQueue(account) {
   return true;
 }
 
+function showAccountShortContentQueue(account) {
+  if (!account || account.id !== selectedAccount()?.id) return;
+  state.shortContentTitles = normalizeShortContentTitleCache(account.shortContentTitleCache || []);
+  state.selectedShortContentTitles = (Array.isArray(account.shortContentSelectedTitles)
+    ? account.shortContentSelectedTitles
+    : []).map((title) => String(title || "").trim()).filter(Boolean);
+  renderShortContentTitles(state.shortContentTitles);
+  renderSelectedTitleList();
+}
+
+async function prepareShortContentQueueForSession(account) {
+  if (!account) return [];
+  const reset = await resetStaleShortContentQueue(account);
+  if (!reset && (!Array.isArray(account.shortContentSelectedTitles) || !account.shortContentSelectedTitles.length)) {
+    await refillAutoTitleQueue(account);
+  } else {
+    showAccountShortContentQueue(account);
+  }
+  const selected = Array.isArray(account.shortContentSelectedTitles)
+    ? account.shortContentSelectedTitles.map((title) => String(title || "").trim()).filter(Boolean)
+    : [];
+  if (!selected.length) {
+    throw new Error(`${account.label || account.naverId} 계정에서 작성할 숏텐츠 제목을 선택하지 못했습니다.`);
+  }
+  return selected;
+}
+
 function consumeAutoTitle(account, title) {
   const target = String(title || "").trim();
   account.shortContentSelectedTitles = (Array.isArray(account.shortContentSelectedTitles)
@@ -1276,7 +1329,7 @@ function consumeAutoTitle(account, title) {
   if (account.id === selectedAccount()?.id) {
     state.selectedShortContentTitles = [...account.shortContentSelectedTitles];
     renderShortContentTitles(state.shortContentTitles);
-    setSelectedTitleText(state.selectedShortContentTitles[0] || "아직 선정 전");
+    renderSelectedTitleList();
   }
 }
 
@@ -1389,7 +1442,7 @@ async function startAutoPublishing(startTargetKey = "") {
     checkedTargetsWithCategory.map((target) => [target.account.id, target.account])
   ).values()];
   for (const account of checkedAccounts) {
-    await resetStaleShortContentQueue(account);
+    await prepareShortContentQueueForSession(account);
   }
   const checkedTargetsWithShortTitles = checkedTargetsWithCategory.filter((target) => (
     Array.isArray(target.account?.shortContentSelectedTitles)
@@ -1445,28 +1498,7 @@ async function startAutoPublishing(startTargetKey = "") {
     }
     index %= targets.length;
     const target = targets[index];
-    await resetStaleShortContentQueue(target.account);
-    if (!Array.isArray(target.account.shortContentSelectedTitles) || !target.account.shortContentSelectedTitles.length) {
-      if (repeatEnabled) {
-        await refillAutoTitleQueue(target.account);
-        if (!target.account.shortContentSelectedTitles.length) {
-          addLog({
-            level: "warn",
-            message: `${target.account.label || target.account.naverId} 계정에서 선택할 숏텐츠 제목을 찾지 못해 다음 주기에 다시 시도합니다.`,
-            at: new Date().toISOString()
-          });
-          index += 1;
-          const waitMinutes = Number($("#repeatTermMinutes").value || 60);
-          logNextArticleWait(waitMinutes, "숏텐츠 제목 재추출");
-          await delayAuto(waitMinutes);
-          continue;
-        }
-      } else {
-        oneShotTargetKeys.delete(autoTargetKey(target));
-        index = 0;
-        continue;
-      }
-    }
+    await prepareShortContentQueueForSession(target.account);
     if (target.account.sessionStatus === "expired") {
       if (!repeatEnabled) {
         addLog({
@@ -1507,6 +1539,10 @@ async function startAutoPublishing(startTargetKey = "") {
     }
     clearPendingAutoTarget(autoTargetKey(target));
     const currentTitle = String(target.account.shortContentSelectedTitles[0] || "").trim();
+    if (!currentTitle) {
+      throw new Error(`${target.account.label || target.account.naverId} 계정의 선택된 숏텐츠 제목이 없어 글 작성을 시작할 수 없습니다.`);
+    }
+    showAccountShortContentQueue(target.account);
     let autoAttemptLimit = AUTO_TARGET_MAX_ATTEMPTS;
     for (let attempt = 1; attempt <= autoAttemptLimit && state.autoRunning; attempt += 1) {
       addLog({
@@ -1514,7 +1550,7 @@ async function startAutoPublishing(startTargetKey = "") {
         message: `자동 Cycle 시작 (${attempt}/${autoAttemptLimit}): ${target.account.label || target.account.naverId} / ${target.category.name}`,
         at: new Date().toISOString()
       });
-      setSelectedTitleText("아직 선정 전");
+      setSelectedTitleText("후킹 제목 생성 중");
       $("#articlePreview").value = "";
       renderImages([]);
       renderImageNotes([]);
@@ -1670,16 +1706,20 @@ async function boot() {
   const account = selectedAccount();
   if (account) {
     selectAccount(account.id);
-    await loadNewsTitles({
-      account,
-      preserveSelected: true,
-      reason: "앱 새 세션 시작"
-    });
+    try {
+      await prepareShortContentQueueForSession(account);
+    } catch (error) {
+      addLog({
+        level: "warn",
+        message: `새 세션의 숏텐츠 제목 준비 실패: ${error.message}`,
+        at: new Date().toISOString()
+      });
+    }
   }
   renderHistory(state.history);
 
   window.blogAuto.onAccountsUpdate((store) => {
-    state.accountStore = store;
+    applyAccountStore(store);
     renderAccounts();
     fillAccountForm(selectedAccount());
     syncShortContentsFromAccount(selectedAccount());
@@ -1763,7 +1803,7 @@ async function boot() {
     }
     persistShortContentsToAccount();
     renderShortContentTitles(state.shortContentTitles);
-    setSelectedTitleText(state.selectedShortContentTitles[0] || "아직 선정 전");
+    renderSelectedTitleList();
     saveAccountStoreNow().catch((error) => {
       addLog({ level: "error", message: `숏텐츠 선택 저장 실패: ${error.message}`, at: new Date().toISOString() });
     });
