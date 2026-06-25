@@ -15,7 +15,6 @@ const {
   ensureAccountStoreFile,
   readAccountStore,
   writeAccountStore,
-  resetShortContentSelectedTitles,
   updateAccountSession,
   getAccountProfileDir
 } = require("./lib/accountStore");
@@ -1040,7 +1039,6 @@ app.whenReady().then(() => {
   ensureSettingsFile(getRuntimeRoot());
   const startupSettings = readSettings(getRuntimeRoot());
   ensureAccountStoreFile(getRuntimeRoot(), startupSettings);
-  resetShortContentSelectedTitles(getRuntimeRoot(), startupSettings);
   createWindow();
 
   ipcMain.handle("app:getInitialData", () => {

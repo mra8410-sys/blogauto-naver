@@ -237,10 +237,11 @@ assertCondition(
   "repeat publishing must refill a random short-content title queue after the selected batch is exhausted"
 );
 assertCondition(
-  sourceFiles.accountStore.content.includes("function resetShortContentSelectedTitles")
-    && sourceFiles.accountStore.content.includes("account.shortContentSelectedTitles = []")
-    && sourceFiles.main.content.includes("resetShortContentSelectedTitles(getRuntimeRoot(), startupSettings)"),
-  "app startup must clear every account's selected short-content title queue"
+  sourceFiles.rendererApp.content.includes("const SHORT_CONTENT_RESET_GAP_MS = 8 * 60 * 60 * 1000")
+    && sourceFiles.rendererApp.content.includes("async function resetStaleShortContentQueue")
+    && sourceFiles.rendererApp.content.includes("await resetStaleShortContentQueue(target.account)")
+    && !sourceFiles.main.content.includes("resetShortContentSelectedTitles(getRuntimeRoot(), startupSettings)"),
+  "selected short-content title queues must reset after an eight-hour completed-article gap"
 );
 assertCondition(
   sourceFiles.shortContents.content.includes("/&#x([0-9a-f]+);/gi")

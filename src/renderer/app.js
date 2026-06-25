@@ -15,6 +15,8 @@ const state = {
   accountManagerOpen: false,
   categoryManagerOpen: false,
   editingCategoryId: "",
+  history: [],
+  staleTitleResetHistory: {},
   shortContentTitles: [],
   selectedShortContentTitles: [],
   currentArticleTitle: "",
@@ -43,6 +45,7 @@ const AGENT_MODEL_SELECTORS = {
 const VALID_AGENT_MODEL_VALUES = new Set(["low", "medium", "high", "xhigh"]);
 const AUTO_TARGET_MAX_ATTEMPTS = 3;
 const AUTO_RESEARCH_MAX_ATTEMPTS = 2;
+const SHORT_CONTENT_RESET_GAP_MS = 8 * 60 * 60 * 1000;
 const DEFAULT_IMAGE_ASPECT_RATIO = "16:9";
 const IMAGE_ASPECT_RATIOS = new Set([DEFAULT_IMAGE_ASPECT_RATIO, "9:16", "1:1"]);
 const IMAGE_COUNTS = new Set([1, 3, 5, 7]);
@@ -1225,6 +1228,46 @@ async function refillAutoTitleQueue(account, options = {}) {
   return selected;
 }
 
+function latestCompletedArticleForAccount(account) {
+  const blogId = String(account?.blogId || account?.naverId || "").trim();
+  if (!blogId) return null;
+  return (Array.isArray(state.history) ? state.history : [])
+    .filter((entry) => (
+      String(entry?.blog_id || "").trim() === blogId
+      && ["success", "generated"].includes(String(entry?.status || "").toLowerCase())
+      && String(entry?.title || "").trim()
+      && Number.isFinite(Date.parse(entry?.create_at || ""))
+    ))
+    .sort((a, b) => Date.parse(b.create_at) - Date.parse(a.create_at))[0] || null;
+}
+
+async function resetStaleShortContentQueue(account) {
+  if (!account || !Array.isArray(account.shortContentSelectedTitles) || !account.shortContentSelectedTitles.length) {
+    return false;
+  }
+  const latestArticle = latestCompletedArticleForAccount(account);
+  if (!latestArticle) return false;
+  const latestCreatedAt = String(latestArticle.create_at || "");
+  if (Date.now() - Date.parse(latestCreatedAt) < SHORT_CONTENT_RESET_GAP_MS) return false;
+  if (state.staleTitleResetHistory[account.id] === latestCreatedAt) return false;
+
+  state.staleTitleResetHistory[account.id] = latestCreatedAt;
+  account.shortContentSelectedTitles = [];
+  if (account.id === selectedAccount()?.id) {
+    state.selectedShortContentTitles = [];
+    renderShortContentTitles(state.shortContentTitles);
+    renderSelectedTitleList();
+  }
+  await saveAccountStoreNow();
+  addLog({
+    level: "info",
+    message: `${account.label || account.naverId}의 마지막 생성 글 이후 8시간 이상 지나 선택된 숏텐츠 제목 목록을 초기화하고 새 제목을 불러옵니다.`,
+    at: new Date().toISOString()
+  });
+  await refillAutoTitleQueue(account);
+  return true;
+}
+
 function consumeAutoTitle(account, title) {
   const target = String(title || "").trim();
   account.shortContentSelectedTitles = (Array.isArray(account.shortContentSelectedTitles)
@@ -1342,6 +1385,12 @@ async function startAutoPublishing(startTargetKey = "") {
   if (!checkedTargetsWithCategory.length) {
     throw new Error("자동 발행하려면 체크된 카테고리의 블로그 카테고리명을 먼저 등록하세요.");
   }
+  const checkedAccounts = [...new Map(
+    checkedTargetsWithCategory.map((target) => [target.account.id, target.account])
+  ).values()];
+  for (const account of checkedAccounts) {
+    await resetStaleShortContentQueue(account);
+  }
   const checkedTargetsWithShortTitles = checkedTargetsWithCategory.filter((target) => (
     Array.isArray(target.account?.shortContentSelectedTitles)
       && target.account.shortContentSelectedTitles.some((title) => String(title || "").trim())
@@ -1396,6 +1445,7 @@ async function startAutoPublishing(startTargetKey = "") {
     }
     index %= targets.length;
     const target = targets[index];
+    await resetStaleShortContentQueue(target.account);
     if (!Array.isArray(target.account.shortContentSelectedTitles) || !target.account.shortContentSelectedTitles.length) {
       if (repeatEnabled) {
         await refillAutoTitleQueue(target.account);
@@ -1611,6 +1661,7 @@ async function boot() {
   $("#runtimePath").textContent = initial.runtimeRoot;
   state.chrome = initial.chrome || state.chrome;
   state.accountStore = initial.accountStore || state.accountStore;
+  state.history = Array.isArray(initial.history) ? initial.history : [];
   applySettings(initial.settings || {});
   setCodexRateLimits(initial.settings?.codexRateLimits || null);
   refreshCodexUsageOnStartup();
@@ -1625,7 +1676,7 @@ async function boot() {
       reason: "앱 새 세션 시작"
     });
   }
-  renderHistory(initial.history || []);
+  renderHistory(state.history);
 
   window.blogAuto.onAccountsUpdate((store) => {
     state.accountStore = store;
@@ -1668,7 +1719,8 @@ async function boot() {
     if (payload.tokenUsage?.rateLimits) setCodexRateLimits(payload.tokenUsage.rateLimits);
     renderImages(payload.images || []);
     renderImageNotes(payload.imageNotes || []);
-    renderHistory(payload.history || []);
+    state.history = Array.isArray(payload.history) ? payload.history : state.history;
+    renderHistory(state.history);
   });
 
   $("#jobForm").addEventListener("submit", async (event) => {
