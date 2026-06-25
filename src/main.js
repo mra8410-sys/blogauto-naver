@@ -8,9 +8,9 @@ const { createEmbedding, cosineSimilarity } = require("./lib/embedding");
 const { collectSearchResults, summarizeSourceQuality } = require("./lib/search");
 const { runCodexGeneration, fetchCodexUsageSnapshot } = require("./lib/codexRunner");
 const { normalizeAgentResult, getPreviewImages, deleteGeneratedImages } = require("./lib/imageAssets");
-const { publishToNaver, checkNaverSession } = require("./lib/naverPublisher");
+const { publishToNaver, checkNaverSession, loadEconomicNewsTitles } = require("./lib/naverPublisher");
 const { ensureSettingsFile, normalizeImageAspectRatio, readSettings, writeSettings } = require("./lib/settings");
-const { listShortContentCategories, listShortContentTitles } = require("./lib/shortContents");
+const { normalizeNewsTitles } = require("./lib/shortContents");
 const {
   ensureAccountStoreFile,
   readAccountStore,
@@ -1085,8 +1085,27 @@ app.whenReady().then(() => {
     }
     return fs.readFileSync(target, "utf8").replace(/^\uFEFF/, "");
   });
-  ipcMain.handle("shortcontents:categories", () => listShortContentCategories());
-  ipcMain.handle("shortcontents:titles", (_event, categoryName) => listShortContentTitles(categoryName));
+  ipcMain.handle("news:titles", async (_event, accountId) => {
+    const runtimeRoot = getRuntimeRoot();
+    const settings = readSettings(runtimeRoot);
+    const store = readAccountStore(runtimeRoot, settings);
+    const account = store.accounts.find((item) => item.id === accountId);
+    if (!account) throw new Error("뉴스 제목을 저장할 계정을 먼저 선택하세요.");
+    const browserProfileDir = getAccountProfileDir(runtimeRoot, account);
+    const key = sessionKeyFor(account, browserProfileDir);
+    const session = reusableNaverSession(key);
+    const result = await loadEconomicNewsTitles({
+      browserProfileDir,
+      preparedContext: session?.context
+    });
+    return {
+      source: "naver-daum-economic-news",
+      titles: normalizeNewsTitles([
+        ...result.naverTitles,
+        ...result.daumTitles
+      ], 15)
+    };
+  });
   ipcMain.handle("codex:refreshUsage", async () => {
     const runtimeRoot = getRuntimeRoot();
     const settings = readSettings(runtimeRoot);

@@ -15,8 +15,6 @@ const state = {
   accountManagerOpen: false,
   categoryManagerOpen: false,
   editingCategoryId: "",
-  shortContentCategories: [],
-  selectedShortContentCategory: "",
   shortContentTitles: [],
   selectedShortContentTitles: [],
   currentArticleTitle: "",
@@ -282,6 +280,11 @@ async function checkAccountSession(account, options = {}) {
       renderAccounts();
       setRunState("generated", "세션 정상");
       const verifiedAccountId = currentAccount?.id || account.id || "";
+      await loadNewsTitles({
+        account: currentAccount || account,
+        preserveSelected: true,
+        reason: "계정 세션 시작"
+      });
       if (resumeAuto && state.autoRunning && state.autoWaitingSessionAccountId === verifiedAccountId) {
         addLog({
           level: "info",
@@ -687,9 +690,6 @@ function selectAccount(accountId) {
   clearCategoryForm();
   renderAccounts();
   syncShortContentsFromAccount(account);
-  refreshShortContentsForCurrentAccount({ quiet: true }).catch((error) => {
-    addLog({ level: "error", message: `숏텐츠 제목 자동 갱신 실패: ${error.message}`, at: new Date().toISOString() });
-  });
   saveAccountStoreNow();
 }
 
@@ -837,7 +837,9 @@ function normalizeShortContentTitleCache(titles = []) {
   return (Array.isArray(titles) ? titles : [])
     .map((item, index) => ({
       id: String(item?.id || `short_title_${index + 1}`),
-      title: String(item?.title || item || "").trim()
+      title: String(item?.title || item || "").trim(),
+      source: String(item?.source || "").trim(),
+      url: String(item?.url || "").trim()
     }))
     .filter((item) => item.title);
 }
@@ -853,11 +855,13 @@ function normalizeTopicModeValue(value) {
 
 function normalizeRandomSelectionCount(value) {
   const count = Number(value || 5);
-  return Number.isInteger(count) && count >= 1 && count <= 20 ? count : 5;
+  return Number.isInteger(count) && count >= 1 && count <= 15 ? count : 5;
 }
 
 function promptProfileFromAccount(account = selectedAccount(), categoryName = "") {
-  const category = String(categoryName || account?.shortContentCategory || "").trim();
+  const defaultCategory = (account?.categories || []).find((item) => item.checked !== false && hasCategoryName(item))
+    || (account?.categories || []).find((item) => hasCategoryName(item));
+  const category = String(categoryName || defaultCategory?.name || account?.shortContentCategory || "").trim();
   const profile = category && account?.shortContentPromptProfiles?.[category]
     ? account.shortContentPromptProfiles[category]
     : {};
@@ -870,8 +874,8 @@ function promptProfileFromAccount(account = selectedAccount(), categoryName = ""
   };
 }
 
-function shortContentSettingsFromAccount(account = selectedAccount()) {
-  const promptProfile = promptProfileFromAccount(account);
+function shortContentSettingsFromAccount(account = selectedAccount(), categoryName = "") {
+  const promptProfile = promptProfileFromAccount(account, categoryName);
   return {
     writingTone: String(account?.shortContentWritingTone || ""),
     articleLength: normalizeArticleLengthValue(account?.shortContentArticleLength),
@@ -884,7 +888,6 @@ function shortContentSettingsFromAccount(account = selectedAccount()) {
 function syncShortContentsFromAccount(account = selectedAccount()) {
   const activeAccount = account || null;
   const shortSettings = shortContentSettingsFromAccount(activeAccount);
-  state.selectedShortContentCategory = String(activeAccount?.shortContentCategory || "");
   state.selectedShortContentTitles = Array.isArray(activeAccount?.shortContentSelectedTitles)
     ? activeAccount.shortContentSelectedTitles.map((title) => String(title || "").trim()).filter(Boolean)
     : [];
@@ -903,22 +906,20 @@ function syncShortContentsFromAccount(account = selectedAccount()) {
   if ($("#imagePromptText")) $("#imagePromptText").value = state.imagePromptText;
   renderPromptFileLabels();
   updateModeControls();
-  renderShortContentCategories(state.shortContentCategories);
-  renderShortContentTitles(state.shortContentTitles, state.selectedShortContentCategory);
+  renderShortContentTitles(state.shortContentTitles);
   setSelectedTitleText(state.selectedShortContentTitles[0] || "아직 선정 전");
 }
 
 function persistShortContentsToAccount() {
   const account = selectedAccount();
   if (!account) return null;
-  account.shortContentCategory = state.selectedShortContentCategory;
   account.shortContentSelectedTitles = [...state.selectedShortContentTitles];
   account.shortContentTitleCache = normalizeShortContentTitleCache(state.shortContentTitles);
   account.shortContentWritingTone = $("#writingTone")?.value.trim() || "";
   account.shortContentArticleLength = normalizeArticleLengthValue($("#articleLength")?.value || 1500);
   account.shortContentTopicMode = normalizeTopicModeValue($("#topicMode")?.value || "manual");
   account.shortContentRandomSelectionCount = normalizeRandomSelectionCount($("#shortContentRandomSelectionCount")?.value || 5);
-  const category = String(state.selectedShortContentCategory || account.shortContentCategory || "").trim();
+  const category = promptProfileFromAccount(account).category;
   state.articlePromptText = $("#articlePromptText")?.value || "";
   state.imagePromptText = $("#imagePromptText")?.value || "";
   if (category) {
@@ -933,38 +934,7 @@ function persistShortContentsToAccount() {
   return account;
 }
 
-function loadPromptProfileForCategory(categoryName, account = selectedAccount()) {
-  const profile = promptProfileFromAccount(account, categoryName);
-  state.articlePromptFilePath = profile.articlePromptFilePath;
-  state.imagePromptFilePath = profile.imagePromptFilePath;
-  state.articlePromptText = profile.articlePromptText;
-  state.imagePromptText = profile.imagePromptText;
-  if ($("#articlePromptText")) $("#articlePromptText").value = profile.articlePromptText;
-  if ($("#imagePromptText")) $("#imagePromptText").value = profile.imagePromptText;
-  renderPromptFileLabels();
-}
-
-function renderShortContentCategories(categories = []) {
-  const container = $("#shortContentsCategoryList");
-  if (!container) return;
-  container.hidden = false;
-  if (!selectedAccount()) {
-    container.innerHTML = "<span class=\"hint\">숏텐츠를 관리할 계정을 먼저 선택하세요.</span>";
-    return;
-  }
-  if (!categories.length) {
-    container.innerHTML = "<span class=\"hint\">표시할 숏텐츠 카테고리가 없습니다.</span>";
-    return;
-  }
-  container.innerHTML = categories
-    .map((category) => {
-      const selected = category.name === state.selectedShortContentCategory ? " selected" : "";
-      return `<button class="shortcontents-chip${selected}" type="button" data-category="${escapeHtml(category.name)}">${escapeHtml(category.name)}</button>`;
-    })
-    .join("");
-}
-
-function renderShortContentTitles(titles = [], categoryName = "") {
+function renderShortContentTitles(titles = []) {
   const container = $("#shortContentsTitleList");
   if (!container) return;
   container.hidden = false;
@@ -972,7 +942,7 @@ function renderShortContentTitles(titles = [], categoryName = "") {
     container.innerHTML = "<span class=\"hint\">계정을 선택하면 계정별 숏텐츠 제목을 관리할 수 있습니다.</span>";
     return;
   }
-  const title = categoryName ? `<strong>${escapeHtml(categoryName)} 제목 20개</strong>` : "<strong>제목 20개</strong>";
+  const title = "<strong>경제 뉴스 제목 15개</strong>";
   if (!titles.length) {
     container.innerHTML = `${title}<span class="hint">표시할 제목이 없습니다.</span>`;
     return;
@@ -982,7 +952,8 @@ function renderShortContentTitles(titles = [], categoryName = "") {
     "<div class=\"shortcontents-title-items\">",
     ...titles.map((item, index) => {
       const selected = state.selectedShortContentTitles.includes(item.title) ? " selected" : "";
-      return `<button class="shortcontents-title-item${selected}" type="button" data-title="${escapeHtml(item.title)}"><span>${index + 1}</span>${escapeHtml(item.title)}</button>`;
+      const source = item.source ? `<small>${escapeHtml(item.source)}</small>` : "";
+      return `<button class="shortcontents-title-item${selected}" type="button" data-title="${escapeHtml(item.title)}"><span>${index + 1}</span><span>${escapeHtml(item.title)}${source}</span></button>`;
     }),
     "</div>"
   ].join("");
@@ -997,9 +968,8 @@ function renderPromptFileLabels() {
   const imageLabel = $("#imagePromptFileName");
   const categoryLabel = $("#promptCategoryName");
   if (categoryLabel) {
-    categoryLabel.textContent = state.selectedShortContentCategory
-      ? `${state.selectedShortContentCategory} 카테고리 설정`
-      : "숏텐츠 카테고리를 선택하세요.";
+    const category = promptProfileFromAccount().category;
+    categoryLabel.textContent = category ? `${category} 카테고리 설정` : "블로그 발행 카테고리를 등록하세요.";
   }
   if (articleLabel) {
     articleLabel.textContent = state.articlePromptFilePath
@@ -1015,69 +985,41 @@ function renderPromptFileLabels() {
   }
 }
 
-async function loadShortContentCategories(options = {}) {
-  const quiet = options.quiet === true;
-  const button = $("#loadShortContentsButton");
-  if (!selectedAccount()) {
-    addLog({ level: "warn", message: "숏텐츠 카테고리를 불러오려면 계정을 먼저 선택하세요.", at: new Date().toISOString() });
+async function loadNewsTitles(options = {}) {
+  const button = $("#loadNewsTitlesButton");
+  const account = options.account || selectedAccount();
+  if (!account) {
+    addLog({ level: "warn", message: "뉴스 제목을 저장할 계정을 먼저 선택하세요.", at: new Date().toISOString() });
     return;
   }
   if (button) button.disabled = true;
   try {
-    const result = await window.blogAuto.loadShortContentCategories();
-    state.shortContentCategories = Array.isArray(result?.categories) ? result.categories : [];
-    renderShortContentCategories(state.shortContentCategories);
+    const result = await window.blogAuto.loadNewsTitles(account.id);
+    const titles = normalizeShortContentTitleCache(result?.titles || []);
+    account.shortContentTitleCache = titles;
+    if (options.preserveSelected !== true) {
+      account.shortContentSelectedTitles = [];
+    }
+    if (account.id === selectedAccount()?.id) {
+      state.shortContentTitles = titles;
+      state.selectedShortContentTitles = Array.isArray(account.shortContentSelectedTitles)
+        ? [...account.shortContentSelectedTitles]
+        : [];
+      persistShortContentsToAccount();
+      renderShortContentTitles(state.shortContentTitles);
+      renderSelectedTitleList();
+    }
+    await saveAccountStoreNow();
     addLog({
       level: "info",
-      message: `숏텐츠 카테고리 ${state.shortContentCategories.length}개를 불러왔습니다.`,
+      message: `${account.label || account.naverId} 경제 뉴스 제목 ${titles.length}개를 다시 검색했습니다. (네이버 5개 + 다음 10개${options.reason ? ` / ${options.reason}` : ""})`,
       at: new Date().toISOString()
     });
   } catch (error) {
-    addLog({ level: "error", message: `숏텐츠 카테고리 로드 실패: ${error.message}`, at: new Date().toISOString() });
+    addLog({ level: "error", message: `경제 뉴스 제목 로드 실패: ${error.message}`, at: new Date().toISOString() });
   } finally {
     if (button) button.disabled = false;
   }
-}
-
-async function loadShortContentTitles(categoryName, options = {}) {
-  const category = String(categoryName || "").trim();
-  const preserveSelected = options.preserveSelected === true;
-  if (!category) return;
-  if (!selectedAccount()) {
-    addLog({ level: "warn", message: "숏텐츠 제목을 관리할 계정을 먼저 선택하세요.", at: new Date().toISOString() });
-    return;
-  }
-  if (state.selectedShortContentCategory && state.selectedShortContentCategory !== category) {
-    persistShortContentsToAccount();
-  }
-  state.selectedShortContentCategory = category;
-  loadPromptProfileForCategory(category);
-  if (!preserveSelected) {
-    state.selectedShortContentTitles = [];
-  }
-  renderShortContentCategories(state.shortContentCategories);
-  const result = await window.blogAuto.loadShortContentTitles(category);
-  state.shortContentTitles = Array.isArray(result?.titles) ? result.titles : [];
-  persistShortContentsToAccount();
-  await saveAccountStoreNow();
-  renderShortContentTitles(state.shortContentTitles, category);
-  renderSelectedTitleList();
-  addLog({
-    level: "info",
-    message: `숏텐츠 ${category} 제목 ${state.shortContentTitles.length}개를 불러왔습니다.`,
-    at: new Date().toISOString()
-  });
-}
-
-async function refreshShortContentsForCurrentAccount(options = {}) {
-  if (!selectedAccount()) return;
-  await loadShortContentCategories(options);
-  const category = String(state.selectedShortContentCategory || selectedAccount()?.shortContentCategory || "").trim();
-  if (!category) return;
-  await loadShortContentTitles(category, {
-    ...options,
-    preserveSelected: true
-  });
 }
 
 function collectForm(target = {}) {
@@ -1086,7 +1028,7 @@ function collectForm(target = {}) {
     || (account?.categories || []).find((item) => item.checked !== false && hasCategoryName(item))
     || (account?.categories || []).find((item) => item.checked !== false);
   const useSelectedAccount = Boolean(target.account || account);
-  const accountShortSettings = shortContentSettingsFromAccount(account);
+  const accountShortSettings = shortContentSettingsFromAccount(account, category?.name || "");
   const usesTargetAccountSettings = Boolean(target.account);
   const publishMode = usesTargetAccountSettings
     ? accountShortSettings.topicMode
@@ -1241,7 +1183,6 @@ function updateModeControls() {
 function getAutoTargets() {
   const targets = [];
   for (const account of state.accountStore.accounts.filter((item) => item.checked !== false)) {
-    if (!String(account.shortContentCategory || "").trim()) continue;
     for (const category of (account.categories || []).filter((item) => item.checked !== false && hasCategoryName(item))) {
       targets.push({ account, category });
     }
@@ -1261,10 +1202,9 @@ function shuffledTitles(titles = []) {
 }
 
 async function refillAutoTitleQueue(account, options = {}) {
-  const category = String(account?.shortContentCategory || "").trim();
-  if (!account || !category) return [];
+  if (!account) return [];
   const count = normalizeRandomSelectionCount(account.shortContentRandomSelectionCount);
-  const result = await window.blogAuto.loadShortContentTitles(category);
+  const result = await window.blogAuto.loadNewsTitles(account.id);
   const titles = normalizeShortContentTitleCache(result?.titles || []);
   const selected = shuffledTitles(titles).slice(0, Math.min(count, titles.length));
   account.shortContentTitleCache = titles;
@@ -1273,15 +1213,13 @@ async function refillAutoTitleQueue(account, options = {}) {
   if (account.id === selectedAccount()?.id) {
     state.shortContentTitles = titles;
     state.selectedShortContentTitles = [...selected];
-    state.selectedShortContentCategory = category;
-    renderShortContentCategories(state.shortContentCategories);
-    renderShortContentTitles(titles, category);
+    renderShortContentTitles(titles);
     setSelectedTitleText(selected[0] || "아직 선정 전");
   }
   await saveAccountStoreNow();
   addLog({
     level: "info",
-    message: `${account.label || account.naverId} / ${category} 카테고리를 다시 불러와 제목 ${titles.length}개 중 ${selected.length}개를 랜덤 선택했습니다.`,
+    message: `${account.label || account.naverId} 계정에서 경제 뉴스 제목 ${titles.length}개 중 ${selected.length}개를 랜덤 선택했습니다.`,
     at: new Date().toISOString()
   });
   return selected;
@@ -1294,7 +1232,7 @@ function consumeAutoTitle(account, title) {
     : []).filter((item, index) => index > 0 || String(item || "").trim() !== target);
   if (account.id === selectedAccount()?.id) {
     state.selectedShortContentTitles = [...account.shortContentSelectedTitles];
-    renderShortContentTitles(state.shortContentTitles, state.selectedShortContentCategory);
+    renderShortContentTitles(state.shortContentTitles);
     setSelectedTitleText(state.selectedShortContentTitles[0] || "아직 선정 전");
   }
 }
@@ -1612,6 +1550,11 @@ async function startAutoPublishing(startTargetKey = "") {
       at: new Date().toISOString()
     });
     if (repeatEnabled && target.account.shortContentSelectedTitles.length === 0) {
+      addLog({
+        level: "info",
+        message: `${target.account.label || target.account.naverId} 선택 제목 목록을 모두 작성해 경제 뉴스를 다시 검색합니다.`,
+        at: new Date().toISOString()
+      });
       await refillAutoTitleQueue(target.account);
     }
     if (!repeatEnabled) {
@@ -1674,7 +1617,14 @@ async function boot() {
   showStartupNoticeIfNeeded();
   renderAccounts();
   const account = selectedAccount();
-  if (account) selectAccount(account.id);
+  if (account) {
+    selectAccount(account.id);
+    await loadNewsTitles({
+      account,
+      preserveSelected: true,
+      reason: "앱 새 세션 시작"
+    });
+  }
   renderHistory(initial.history || []);
 
   window.blogAuto.onAccountsUpdate((store) => {
@@ -1744,12 +1694,9 @@ async function boot() {
     }
   });
 
-  $("#loadShortContentsButton")?.addEventListener("click", loadShortContentCategories);
-  $("#shortContentsCategoryList")?.addEventListener("click", (event) => {
-    const button = event.target.closest(".shortcontents-chip");
-    if (!button) return;
-    loadShortContentTitles(button.dataset.category).catch((error) => {
-      addLog({ level: "error", message: `숏텐츠 제목 로드 실패: ${error.message}`, at: new Date().toISOString() });
+  $("#loadNewsTitlesButton")?.addEventListener("click", () => {
+    loadNewsTitles().catch((error) => {
+      addLog({ level: "error", message: `경제 뉴스 제목 로드 실패: ${error.message}`, at: new Date().toISOString() });
     });
   });
   $("#shortContentsTitleList")?.addEventListener("click", (event) => {
@@ -1763,7 +1710,7 @@ async function boot() {
       state.selectedShortContentTitles.push(title);
     }
     persistShortContentsToAccount();
-    renderShortContentTitles(state.shortContentTitles, state.selectedShortContentCategory);
+    renderShortContentTitles(state.shortContentTitles);
     setSelectedTitleText(state.selectedShortContentTitles[0] || "아직 선정 전");
     saveAccountStoreNow().catch((error) => {
       addLog({ level: "error", message: `숏텐츠 선택 저장 실패: ${error.message}`, at: new Date().toISOString() });

@@ -43,7 +43,7 @@ function normalizeTopicMode(value) {
 
 function normalizeRandomSelectionCount(value) {
   const count = Number(value || 5);
-  return Number.isInteger(count) && count >= 1 && count <= 20 ? count : 5;
+  return Number.isInteger(count) && count >= 1 && count <= 15 ? count : 5;
 }
 
 function normalizePromptProfile(profile = {}) {
@@ -157,7 +157,9 @@ function normalizeAccount(account) {
       ? account.shortContentTitleCache
         .map((item, index) => ({
           id: String(item?.id || `short_title_${index + 1}`),
-          title: decodeHtml(item?.title || item).trim()
+          title: decodeHtml(item?.title || item).trim(),
+          source: String(item?.source || "").trim(),
+          url: String(item?.url || "").trim()
         }))
         .filter((item) => item.title)
       : [],

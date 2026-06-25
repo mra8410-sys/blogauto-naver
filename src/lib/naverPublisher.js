@@ -1785,10 +1785,8 @@ async function insertArticleWithImages(page, selectors, article, bodyImages, opt
     }
 
     await page.keyboard.press("Enter");
-    await page.keyboard.press("Enter");
     await insertImageByButton(page, selectors.imageButton, image.path, log);
     await clearAiMarkForLatestImage(page, log, `본문 이미지 ${block.sequence}`);
-    await page.keyboard.press("Enter");
     await page.keyboard.press("Enter");
     log(`본문 이미지 ${block.sequence} 삽입 완료`);
   }
@@ -2404,9 +2402,96 @@ async function checkNaverSession(options) {
   }
 }
 
+async function loadEconomicNewsTitles(options = {}) {
+  let chromium;
+  try {
+    ({ chromium } = require("playwright-core"));
+  } catch {
+    throw new Error("playwright-core가 설치되어 있지 않아 뉴스 제목을 가져올 수 없습니다.");
+  }
+  const browserProfileDir = String(options.browserProfileDir || "").trim();
+  if (!options.preparedContext && !browserProfileDir) {
+    throw new Error("네이버 뉴스 제목을 가져올 계정 프로필이 없습니다.");
+  }
+  if (browserProfileDir) {
+    fs.mkdirSync(browserProfileDir, { recursive: true });
+    markChromeProfileClean(browserProfileDir);
+  }
+  const ownsContext = !options.preparedContext;
+  const context = options.preparedContext || await chromium.launchPersistentContext(
+    browserProfileDir,
+    {
+      ...chromeLaunchOptions({ slowMo: 0, viewport: { width: 1440, height: 1000 } }),
+      headless: true
+    }
+  );
+  const pages = [];
+  try {
+    const naverPage = await context.newPage();
+    pages.push(naverPage);
+    await naverPage.goto("https://news.naver.com/section/101", {
+      waitUntil: "domcontentloaded",
+      timeout: 30000
+    });
+    await naverPage.locator(".section_article.as_headline .sa_list > .sa_item").first().waitFor({
+      state: "attached",
+      timeout: 15000
+    });
+    const naverTitles = await naverPage.locator(
+      ".section_article.as_headline .sa_list > .sa_item .sa_text_title"
+    ).evaluateAll((links) => links.slice(0, 5).map((link) => ({
+      title: (link.textContent || "").trim(),
+      url: link.href || "",
+      source: "네이버 경제 헤드라인"
+    })));
+
+    const daumPage = await context.newPage();
+    pages.push(daumPage);
+    await daumPage.goto("https://finance.daum.net/news#economy", {
+      waitUntil: "domcontentloaded",
+      timeout: 30000
+    });
+    await daumPage.waitForTimeout(1200);
+    const daumTitles = await daumPage.evaluate(() => {
+      const tab = [...document.querySelectorAll("a")]
+        .find((link) => (link.textContent || "").replace(/\s+/g, "") === "많이본뉴스");
+      if (!tab) return [];
+      let container = tab.parentElement;
+      while (container && container !== document.body) {
+        const links = [...container.querySelectorAll('a[href^="https://v.daum.net/v/"]')]
+          .filter((link) => (link.textContent || "").trim());
+        if (links.length >= 10) {
+          return links.slice(0, 10).map((link) => ({
+            title: (link.textContent || "").trim(),
+            url: link.href || "",
+            source: "다음 금융 많이 본 뉴스"
+          }));
+        }
+        container = container.parentElement;
+      }
+      return [];
+    });
+    if (naverTitles.length < 5) {
+      throw new Error(`네이버 경제 헤드라인을 5개 찾지 못했습니다. (${naverTitles.length}개)`);
+    }
+    if (daumTitles.length < 10) {
+      throw new Error(`다음 금융 많이 본 뉴스를 10개 찾지 못했습니다. (${daumTitles.length}개)`);
+    }
+    return { naverTitles, daumTitles };
+  } finally {
+    for (const page of pages) {
+      await page.close().catch(() => {});
+    }
+    if (ownsContext) {
+      await context.close().catch(() => {});
+    }
+  }
+}
+
 module.exports = {
   publishToNaver,
   checkNaverSession,
+  loadEconomicNewsTitles,
   _private: {
     getReservedDateParts,
     shouldUseReservedPublishSchedule,

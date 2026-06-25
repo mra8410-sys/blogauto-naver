@@ -246,12 +246,34 @@ assertCondition(
   sourceFiles.shortContents.content.includes("/&#x([0-9a-f]+);/gi")
     && sourceFiles.shortContents.content.includes("String.fromCodePoint(Number.parseInt(hex, 16))")
     && sourceFiles.accountStore.content.includes("decodeHtml(item?.title || item).trim()"),
-  "short-content titles must decode hexadecimal HTML entities such as &#x27;"
+  "news titles must decode hexadecimal HTML entities such as &#x27;"
 );
 assertCondition(
-  sourceFiles.shortContents.content.includes("sds-comps-text-type-headline(?:1|2)")
-    && sourceFiles.shortContents.content.includes("(body2|headline1|headline2)"),
-  "short-content extraction must support both current headline1 and legacy headline2 Naver markup"
+  sourceFiles.rendererIndex.content.includes("id=\"loadNewsTitlesButton\"")
+    && !sourceFiles.rendererIndex.content.includes("shortContentsCategoryList")
+    && !sourceFiles.rendererIndex.content.includes("loadShortContentsButton")
+    && sourceFiles.preload.content.includes("loadNewsTitles")
+    && !sourceFiles.preload.content.includes("loadShortContentCategories")
+    && !sourceFiles.preload.content.includes("loadShortContentTitles")
+    && sourceFiles.main.content.includes("ipcMain.handle(\"news:titles\"")
+    && !sourceFiles.main.content.includes("shortcontents:categories")
+    && !sourceFiles.main.content.includes("shortcontents:titles"),
+  "short-content category selection must be removed and replaced with one economic-news title feed"
+);
+assertCondition(
+  sourceFiles.naverPublisher.content.includes(".section_article.as_headline .sa_list > .sa_item .sa_text_title")
+    && sourceFiles.naverPublisher.content.includes("https://finance.daum.net/news#economy")
+    && sourceFiles.naverPublisher.content.includes("많이본뉴스")
+    && sourceFiles.main.content.includes("normalizeNewsTitles([")
+    && sourceFiles.main.content.includes("], 15)"),
+  "news feed must combine 5 personalized Naver economic headlines and 10 Daum Finance most-viewed titles"
+);
+assertCondition(
+  sourceFiles.rendererApp.content.includes("reason: \"앱 새 세션 시작\"")
+    && sourceFiles.rendererApp.content.includes("reason: \"계정 세션 시작\"")
+    && sourceFiles.rendererApp.content.includes("선택 제목 목록을 모두 작성해 경제 뉴스를 다시 검색합니다.")
+    && !sourceFiles.rendererApp.content.includes("refreshShortContentsForCurrentAccount"),
+  "news titles must refresh only for a new app/account session and when the repeat title queue is exhausted"
 );
 assertCondition(
   sourceFiles.codexRunner.content.includes("Never write first-person investment, purchase, profit/loss")
@@ -1381,6 +1403,35 @@ if (!sourceFiles.naverPublisher.content.includes("[role='button']:has-text('발�
 if (insertArticleWithImages && !insertArticleWithImages.content.includes("clearAiMarkForLatestImage(page, log")) {
   failed = true;
   console.error("src/lib/naverPublisher.js: body image insertion must attempt to clear Naver AI image mark");
+}
+if (
+  insertArticleWithImages
+  && insertArticleWithImages.content.includes(
+    "await page.keyboard.press(\"Enter\");\n    await page.keyboard.press(\"Enter\");\n    await insertImageByButton"
+  )
+) {
+  failed = true;
+  console.error("src/lib/naverPublisher.js: section headings must not add blank Enter lines before body images");
+}
+if (
+  insertArticleWithImages
+  && insertArticleWithImages.content.includes(
+    "await clearAiMarkForLatestImage(page, log, `본문 이미지 ${block.sequence}`);\n    await page.keyboard.press(\"Enter\");\n    await page.keyboard.press(\"Enter\");"
+  )
+) {
+  failed = true;
+  console.error("src/lib/naverPublisher.js: body images must add only one Enter before section text");
+}
+if (
+  insertArticleWithImages
+  && (!insertArticleWithImages.content.includes(
+    "await page.keyboard.press(\"Enter\");\n    await insertImageByButton"
+  ) || !insertArticleWithImages.content.includes(
+    "await clearAiMarkForLatestImage(page, log, `본문 이미지 ${block.sequence}`);\n    await page.keyboard.press(\"Enter\");"
+  ))
+) {
+  failed = true;
+  console.error("src/lib/naverPublisher.js: section flow must be heading, one Enter, image, one Enter, body");
 }
 assertCondition(
   sourceFiles.imageAssets.content.includes("function deleteGeneratedImages")
