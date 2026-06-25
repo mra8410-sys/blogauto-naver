@@ -154,6 +154,10 @@ const sourceFiles = {
     relative: "src/lib/imageAssets.js",
     content: fs.readFileSync(path.join(root, "src", "lib", "imageAssets.js"), "utf8")
   },
+  shortContents: {
+    relative: "src/lib/shortContents.js",
+    content: fs.readFileSync(path.join(root, "src", "lib", "shortContents.js"), "utf8")
+  },
   rendererIndex: {
     relative: "src/renderer/index.html",
     content: fs.readFileSync(path.join(root, "src", "renderer", "index.html"), "utf8")
@@ -231,6 +235,31 @@ assertCondition(
     && sourceFiles.rendererApp.content.includes("consumeAutoTitle(target.account, currentTitle)")
     && sourceFiles.rendererApp.content.includes("target.account.shortContentSelectedTitles.length === 0"),
   "repeat publishing must refill a random short-content title queue after the selected batch is exhausted"
+);
+assertCondition(
+  sourceFiles.accountStore.content.includes("function resetShortContentSelectedTitles")
+    && sourceFiles.accountStore.content.includes("account.shortContentSelectedTitles = []")
+    && sourceFiles.main.content.includes("resetShortContentSelectedTitles(getRuntimeRoot(), startupSettings)"),
+  "app startup must clear every account's selected short-content title queue"
+);
+assertCondition(
+  sourceFiles.shortContents.content.includes("/&#x([0-9a-f]+);/gi")
+    && sourceFiles.shortContents.content.includes("String.fromCodePoint(Number.parseInt(hex, 16))")
+    && sourceFiles.accountStore.content.includes("decodeHtml(item?.title || item).trim()"),
+  "short-content titles must decode hexadecimal HTML entities such as &#x27;"
+);
+assertCondition(
+  sourceFiles.shortContents.content.includes("sds-comps-text-type-headline(?:1|2)")
+    && sourceFiles.shortContents.content.includes("(body2|headline1|headline2)"),
+  "short-content extraction must support both current headline1 and legacy headline2 Naver markup"
+);
+assertCondition(
+  sourceFiles.codexRunner.content.includes("Never write first-person investment, purchase, profit/loss")
+    && sourceFiles.codexRunner.content.includes("Keep the title promise and the body aligned")
+    && sourceFiles.codexRunner.content.includes("Each bodyImages[n].prompt must depict only information actually stated")
+    && sourceFiles.codexRunner.content.includes("do not enforce article-prompt instructions that prohibit exaggerated")
+    && sourceFiles.codexRunner.content.includes("When the only concern is tone strength or decisiveness, set riskExpressionPass to true"),
+  "writer and main review must prevent fabricated experience and content drift while allowing strong wording"
 );
 assertCondition(
   sourceFiles.rendererIndex.content.includes("id=\"maxBodyImages\"")
@@ -1353,6 +1382,26 @@ if (insertArticleWithImages && !insertArticleWithImages.content.includes("clearA
   failed = true;
   console.error("src/lib/naverPublisher.js: body image insertion must attempt to clear Naver AI image mark");
 }
+assertCondition(
+  sourceFiles.imageAssets.content.includes("function deleteGeneratedImages")
+    && sourceFiles.imageAssets.content.includes("path.relative(imageRoot, resolved)")
+    && sourceFiles.main.content.includes("deleteGeneratedImages(runtimeRoot, agentResult)")
+    && sourceFiles.main.content.includes("글 작성 완료 후 생성 이미지"),
+  "generated images must be deleted safely after successful Naver writing"
+);
+assertCondition(
+  sourceFiles.main.content.includes("[글 작성 중]")
+    && sourceFiles.main.content.includes("[글 작성 완료]")
+    && sourceFiles.main.content.includes("[네이버 입력 중]")
+    && sourceFiles.main.content.includes("[발행 완료]")
+    && sourceFiles.main.content.includes("[단순 저장 완료]"),
+  "main job flow must log clear writing, publishing, and draft-only states"
+);
+assertCondition(
+  sourceFiles.rendererApp.content.includes("function logNextArticleWait")
+    && sourceFiles.rendererApp.content.includes("[다음 글 대기 중]"),
+  "automatic publishing must log when it is waiting to write the next article"
+);
 const safeClickLocator = extractFunctionBlock(sourceFiles.naverPublisher, "async function safeClickLocator", "safe click helper");
 const dismissBlockingEditorPopup = extractFunctionBlock(sourceFiles.naverPublisher, "async function dismissBlockingEditorPopup", "blocking editor popup helper");
 const insertImageByButton = extractFunctionBlock(sourceFiles.naverPublisher, "async function insertImageByButton", "image insertion helper");

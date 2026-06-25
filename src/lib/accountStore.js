@@ -1,5 +1,6 @@
 const fs = require("node:fs");
 const path = require("node:path");
+const { decodeHtml } = require("./shortContents");
 
 const ECONOMY_IMAGE_PROMPT_PATH = path.join(__dirname, "..", "prompts", "economy-infographic.txt");
 const ECONOMY_IMAGE_CATEGORIES = new Set(["증권", "생활경제"]);
@@ -150,13 +151,13 @@ function normalizeAccount(account) {
     categories,
     shortContentCategory: String(account?.shortContentCategory || "").trim(),
     shortContentSelectedTitles: Array.isArray(account?.shortContentSelectedTitles)
-      ? account.shortContentSelectedTitles.map((title) => String(title || "").trim()).filter(Boolean)
+      ? account.shortContentSelectedTitles.map((title) => decodeHtml(title).trim()).filter(Boolean)
       : [],
     shortContentTitleCache: Array.isArray(account?.shortContentTitleCache)
       ? account.shortContentTitleCache
         .map((item, index) => ({
           id: String(item?.id || `short_title_${index + 1}`),
-          title: String(item?.title || item || "").trim()
+          title: decodeHtml(item?.title || item).trim()
         }))
         .filter((item) => item.title)
       : [],
@@ -234,6 +235,18 @@ function writeAccountStore(runtimeRoot, nextStore, settingsForMigration = {}) {
   return normalized;
 }
 
+function resetShortContentSelectedTitles(runtimeRoot, settingsForMigration = {}) {
+  const store = readAccountStore(runtimeRoot, settingsForMigration);
+  let changed = false;
+  for (const account of store.accounts) {
+    if (account.shortContentSelectedTitles.length) {
+      account.shortContentSelectedTitles = [];
+      changed = true;
+    }
+  }
+  return changed ? writeAccountStore(runtimeRoot, store, settingsForMigration) : store;
+}
+
 function updateAccountSession(runtimeRoot, accountId, sessionStatus, settingsForMigration = {}) {
   const store = readAccountStore(runtimeRoot, settingsForMigration);
   let changed = false;
@@ -265,6 +278,7 @@ module.exports = {
   ensureAccountStoreFile,
   readAccountStore,
   writeAccountStore,
+  resetShortContentSelectedTitles,
   updateAccountSession,
   getAccountProfileDir,
   getAccountStorePath

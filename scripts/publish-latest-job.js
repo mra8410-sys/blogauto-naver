@@ -2,7 +2,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { readSettings } = require("../src/lib/settings");
 const { readAccountStore, getAccountProfileDir } = require("../src/lib/accountStore");
-const { normalizeAgentResult } = require("../src/lib/imageAssets");
+const { normalizeAgentResult, deleteGeneratedImages } = require("../src/lib/imageAssets");
 const { publishToNaver } = require("../src/lib/naverPublisher");
 const { appendHistory, ensureRuntimeFiles } = require("../src/lib/history");
 const { createEmbedding } = require("../src/lib/embedding");
@@ -129,6 +129,11 @@ async function main() {
     browserProfileDir: account ? getAccountProfileDir(runtimeRoot, account) : path.join(runtimeRoot, "browser-profile"),
     log
   });
+  const imageCleanup = deleteGeneratedImages(runtimeRoot, agentResult);
+  log(`글 작성 완료 후 생성 이미지 ${imageCleanup.deleted.length}개 삭제`);
+  for (const failure of imageCleanup.failed) {
+    log(`생성 이미지 삭제 실패: ${failure.path} (${failure.reason})`, "warn");
+  }
   appendHistory(runtimeRoot, {
     id: `${path.basename(jobDir)}_publish_${Date.now()}`,
     create_at: new Date().toISOString(),

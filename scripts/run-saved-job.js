@@ -4,7 +4,7 @@ const { readAccountStore, getAccountProfileDir } = require("../src/lib/accountSt
 const { ensureRuntimeFiles, readHistory, appendHistory } = require("../src/lib/history");
 const { collectSearchResults } = require("../src/lib/search");
 const { runCodexGeneration } = require("../src/lib/codexRunner");
-const { normalizeAgentResult, getPreviewImages } = require("../src/lib/imageAssets");
+const { normalizeAgentResult, getPreviewImages, deleteGeneratedImages } = require("../src/lib/imageAssets");
 const { createEmbedding, cosineSimilarity } = require("../src/lib/embedding");
 const { publishToNaver } = require("../src/lib/naverPublisher");
 
@@ -268,6 +268,11 @@ async function main() {
       browserProfileDir: account ? getAccountProfileDir(runtimeRoot, account) : path.join(runtimeRoot, "browser-profile"),
       log
     });
+    const imageCleanup = deleteGeneratedImages(runtimeRoot, agentResult);
+    log(`글 작성 완료 후 생성 이미지 ${imageCleanup.deleted.length}개 삭제`);
+    for (const failure of imageCleanup.failed) {
+      log(`생성 이미지 삭제 실패: ${failure.path} (${failure.reason})`, "warn");
+    }
     status = "success";
     log("Naver 비공개 발행 완료");
   } else {

@@ -131,12 +131,14 @@ function decodeHtml(value) {
   return String(value || "")
     .replace(/<mark>/gi, "")
     .replace(/<\/mark>/gi, "")
-    .replace(/&quot;/g, "\"")
-    .replace(/&#39;/g, "'")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&nbsp;/g, " ");
+    .replace(/&#x([0-9a-f]+);/gi, (_match, hex) => String.fromCodePoint(Number.parseInt(hex, 16)))
+    .replace(/&#([0-9]+);/g, (_match, decimal) => String.fromCodePoint(Number.parseInt(decimal, 10)))
+    .replace(/&quot;/gi, "\"")
+    .replace(/&apos;/gi, "'")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&nbsp;/gi, " ");
 }
 
 function cleanTitle(value) {
@@ -187,7 +189,7 @@ function shortContentsUrl(query, categoryName) {
 function extractSections(html) {
   const sections = [];
   let current = null;
-  const sectionOrTitlePattern = /<span[^>]*class="[^"]*sds-comps-text-type-(body2|headline2)[^"]*sds-comps-text-weight-xl[^"]*"[^>]*>([\s\S]*?)<\/span>/g;
+  const sectionOrTitlePattern = /<span[^>]*class="[^"]*sds-comps-text-type-(body2|headline1|headline2)[^"]*"[^>]*>([\s\S]*?)<\/span>/g;
 
   for (const match of String(html || "").matchAll(sectionOrTitlePattern)) {
     const type = match[1];
@@ -213,7 +215,7 @@ function extractSections(html) {
 
 function extractNaverTitles(html) {
   const directTitles = [...String(html || "").matchAll(
-    /<span[^>]*class="[^"]*sds-comps-text-type-headline2[^"]*sds-comps-text-weight-xl[^"]*"[^>]*>([\s\S]*?)<\/span>/g
+    /<span[^>]*class="[^"]*sds-comps-text-type-headline(?:1|2)[^"]*"[^>]*>([\s\S]*?)<\/span>/g
   )].map((match) => match[1]);
 
   if (directTitles.length > 0) {
@@ -280,6 +282,7 @@ async function listShortContentTitles(categoryName) {
 module.exports = {
   SHORT_CONTENT_CATEGORIES,
   categoryQuery,
+  decodeHtml,
   extractNaverTitles,
   extractSections,
   listShortContentCategories,

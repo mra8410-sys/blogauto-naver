@@ -1337,6 +1337,15 @@ function delayAuto(minutes) {
   });
 }
 
+function logNextArticleWait(minutes, detail = "") {
+  const waitMinutes = Math.max(1, Number(minutes || 1));
+  addLog({
+    level: "info",
+    message: `[다음 글 대기 중] ${waitMinutes}분 후 다음 글 작성을 시작합니다.${detail ? ` (${detail})` : ""}`,
+    at: new Date().toISOString()
+  });
+}
+
 function waitForAccountSessionOrTerm(accountId, minutes) {
   const waitingAccountId = String(accountId || "");
   const ms = Math.max(1, Number(minutes || 1)) * 60 * 1000;
@@ -1442,7 +1451,9 @@ async function startAutoPublishing(startTargetKey = "") {
         message: "체크된 계정 중 자동 발행 가능한 대상이 없습니다.",
         at: new Date().toISOString()
       });
-      await delayAuto(Number($("#repeatTermMinutes").value || 60));
+      const waitMinutes = Number($("#repeatTermMinutes").value || 60);
+      logNextArticleWait(waitMinutes, "발행 가능한 계정/카테고리 재확인");
+      await delayAuto(waitMinutes);
       continue;
     }
     index %= targets.length;
@@ -1457,7 +1468,9 @@ async function startAutoPublishing(startTargetKey = "") {
             at: new Date().toISOString()
           });
           index += 1;
-          await delayAuto(Number($("#repeatTermMinutes").value || 60));
+          const waitMinutes = Number($("#repeatTermMinutes").value || 60);
+          logNextArticleWait(waitMinutes, "숏텐츠 제목 재추출");
+          await delayAuto(waitMinutes);
           continue;
         }
       } else {
@@ -1608,7 +1621,9 @@ async function startAutoPublishing(startTargetKey = "") {
       index += 1;
     }
     if (state.autoRunning && repeatEnabled) {
-      await delayAuto(Number($("#repeatTermMinutes").value || 60));
+      const waitMinutes = Number($("#repeatTermMinutes").value || 60);
+      logNextArticleWait(waitMinutes);
+      await delayAuto(waitMinutes);
     }
   }
 

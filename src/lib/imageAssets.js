@@ -576,7 +576,46 @@ function getPreviewImages(agentResult) {
   return images;
 }
 
+function deleteGeneratedImages(runtimeRoot, agentResult) {
+  const imageRoot = path.resolve(runtimeRoot, "image");
+  const candidates = [
+    agentResult?.titleImagePath,
+    ...(Array.isArray(agentResult?.bodyImages)
+      ? agentResult.bodyImages.map((item) => item?.path)
+      : [])
+  ]
+    .map((filePath) => String(filePath || "").trim())
+    .filter(Boolean);
+  const deleted = [];
+  const failed = [];
+
+  for (const filePath of [...new Set(candidates)]) {
+    const resolved = path.resolve(filePath);
+    const relative = path.relative(imageRoot, resolved);
+    const isInsideImageRoot = relative
+      && !relative.startsWith("..")
+      && !path.isAbsolute(relative);
+    if (!isInsideImageRoot) {
+      failed.push({ path: resolved, reason: "runtime/image 외부 경로" });
+      continue;
+    }
+    try {
+      fs.rmSync(resolved, { force: true });
+      deleted.push(resolved);
+    } catch (error) {
+      failed.push({ path: resolved, reason: error.message });
+    }
+  }
+
+  if (agentResult && typeof agentResult === "object") {
+    agentResult.titleImagePath = "";
+    agentResult.bodyImages = [];
+  }
+  return { deleted, failed };
+}
+
 module.exports = {
   normalizeAgentResult,
-  getPreviewImages
+  getPreviewImages,
+  deleteGeneratedImages
 };

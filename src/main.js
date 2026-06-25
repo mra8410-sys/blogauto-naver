@@ -7,7 +7,7 @@ const { readHistory, appendHistory, ensureRuntimeFiles } = require("./lib/histor
 const { createEmbedding, cosineSimilarity } = require("./lib/embedding");
 const { collectSearchResults, summarizeSourceQuality } = require("./lib/search");
 const { runCodexGeneration, fetchCodexUsageSnapshot } = require("./lib/codexRunner");
-const { normalizeAgentResult, getPreviewImages } = require("./lib/imageAssets");
+const { normalizeAgentResult, getPreviewImages, deleteGeneratedImages } = require("./lib/imageAssets");
 const { publishToNaver, checkNaverSession } = require("./lib/naverPublisher");
 const { ensureSettingsFile, normalizeImageAspectRatio, readSettings, writeSettings } = require("./lib/settings");
 const { listShortContentCategories, listShortContentTitles } = require("./lib/shortContents");
@@ -15,6 +15,7 @@ const {
   ensureAccountStoreFile,
   readAccountStore,
   writeAccountStore,
+  resetShortContentSelectedTitles,
   updateAccountSession,
   getAccountProfileDir
 } = require("./lib/accountStore");
@@ -627,6 +628,7 @@ async function startJob(form) {
     };
     safeLog(jobId, `Agent 모델 설정: Main ${modelSnapshot.main}, Research/Title ${modelSnapshot.research}, Writer ${modelSnapshot.writer}, Image Worker ${modelSnapshot.image}`);
     safeLog(jobId, `Codex ${usesImages ? "본문/이미지 프롬프트" : "본문"} 생성 시작${generationSubject ? `: ${generationSubject}` : ""}`);
+    safeLog(jobId, `[글 작성 중] ${topic || keyword || category || "제목 준비 중"}`, "info", "writer");
     const generationStartedAt = Date.now();
     let generationPhase = "준비 중";
     const generationHeartbeat = setInterval(() => {
@@ -817,6 +819,7 @@ async function startJob(form) {
       currentDateLabel,
       result: codexResult
     });
+    safeLog(jobId, `[글 작성 완료] ${agentResult.title}`, "info", "writer");
     for (const note of agentResult.imageWarnings || []) {
       const imageNoteLevel = /실패|없|못|권한|거부|찾을 수 없|Access|EPERM|denied/i.test(String(note || ""))
         ? "warn"
@@ -882,6 +885,12 @@ async function startJob(form) {
     let publishReason = "";
 
     if (shouldUploadToNaver) {
+      safeLog(
+        jobId,
+        `[네이버 입력 중] ${agentResult.title}${shouldFinalPublish ? " (발행 예정)" : " (단순 저장 예정)"}`,
+        "info",
+        "main"
+      );
       updateStatus(
         jobId,
         "publishing",
@@ -913,6 +922,13 @@ async function startJob(form) {
         draftOnly: !shouldFinalPublish,
         log: (message, level) => safeLog(jobId, message, level)
       });
+      const imageCleanup = deleteGeneratedImages(runtimeRoot, agentResult);
+      if (imageCleanup.deleted.length) {
+        safeLog(jobId, `글 작성 완료 후 생성 이미지 ${imageCleanup.deleted.length}개를 삭제했습니다.`);
+      }
+      for (const failure of imageCleanup.failed) {
+        safeLog(jobId, `생성 이미지 삭제 실패: ${failure.path} (${failure.reason})`, "warn");
+      }
       if (account.id) {
         updateAccountSession(runtimeRoot, account.id, "valid", settings);
         emitAccountStore(runtimeRoot);
@@ -920,10 +936,12 @@ async function startJob(form) {
       if (shouldFinalPublish) {
         publishStatus = "success";
         updateStatus(jobId, "success", "발행 완료");
+        safeLog(jobId, `[발행 완료] ${agentResult.title}`, "info", "main");
       } else {
         publishStatus = "generated";
         publishReason = "수동 모드로 네이버 글쓰기 저장까지 완료했습니다. 최종 발행은 사용자가 직접 진행해야 합니다.";
         updateStatus(jobId, "generated", "네이버 저장 완료, 수동 발행 대기");
+        safeLog(jobId, `[단순 저장 완료] ${agentResult.title}`, "info", "main");
       }
     } else {
       publishReason = "사용자가 발행 실행을 끄고 생성만 실행했습니다.";
@@ -1020,7 +1038,9 @@ async function startJob(form) {
 app.whenReady().then(() => {
   ensureRuntimeFiles(getRuntimeRoot());
   ensureSettingsFile(getRuntimeRoot());
-  ensureAccountStoreFile(getRuntimeRoot(), readSettings(getRuntimeRoot()));
+  const startupSettings = readSettings(getRuntimeRoot());
+  ensureAccountStoreFile(getRuntimeRoot(), startupSettings);
+  resetShortContentSelectedTitles(getRuntimeRoot(), startupSettings);
   createWindow();
 
   ipcMain.handle("app:getInitialData", () => {
